@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Phone, CheckCircle, PhoneIncoming, RefreshCw, ArrowUpRight, Database, TrendingUp, Users } from "lucide-react";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

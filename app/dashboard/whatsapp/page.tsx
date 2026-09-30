@@ -26,7 +26,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { subDays } from "date-fns";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 import { SPECTRA_WHATSAPP_METRICS } from "@/lib/dummy-data";
 
 export default function WhatsappDashboardPage() {

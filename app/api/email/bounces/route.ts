@@ -60,7 +60,7 @@ export async function GET() {
         }
 
         // Filter for specific emails
-        const targetEmails = ["info@ryansautomation.me", "sales@ryansautomation.me"];
+        const targetEmails = ["info@spectraautomation.me", "sales@spectraautomation.me", "info@scalepods.co"];
         const filteredAccounts = accounts.filter((acc: any) => targetEmails.includes(acc.email));
 
         if (filteredAccounts.length === 0) {

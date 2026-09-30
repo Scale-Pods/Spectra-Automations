@@ -37,7 +37,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { WhatsAppChatDetail } from "@/components/dashboard/whatsapp-chat-detail";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 
 // Raw shape returned by /api/whatsapp-leads
 interface WALead {

@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dialog";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { SMSChatDetail } from "@/components/dashboard/sms-chat-detail";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 
 interface SMSLead {
     "Lead ID"?: string;

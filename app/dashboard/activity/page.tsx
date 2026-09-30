@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
 import { Search, ChevronLeft, ChevronRight, RefreshCw, Phone, Mail, MessageCircle, Activity, AlertCircle } from "lucide-react";

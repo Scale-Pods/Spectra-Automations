@@ -28,7 +28,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SMSChatDetail } from "@/components/dashboard/sms-chat-detail";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 
 interface SentSMSItem {

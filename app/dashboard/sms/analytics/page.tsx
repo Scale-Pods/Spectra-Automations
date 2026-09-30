@@ -36,7 +36,7 @@ import {
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 
 export default function SmsAnalyticsPage() {
     const [mounted, setMounted] = useState(false);

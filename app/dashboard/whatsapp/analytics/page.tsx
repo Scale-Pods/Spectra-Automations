@@ -41,7 +41,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 
 export default function WhatsappAnalyticsPage() {
     const router = useRouter();

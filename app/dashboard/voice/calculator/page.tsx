@@ -9,7 +9,7 @@ import { Calculator, Activity, Crown, Search, Info, RefreshCw, Phone, User, MapP
 import { useData } from "@/context/DataContext";
 import { format, subDays } from "date-fns";
 import { formatDuration } from "@/lib/utils";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 
 import { DateRange } from "react-day-picker";
 

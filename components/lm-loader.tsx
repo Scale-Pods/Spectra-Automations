@@ -1,5 +1,6 @@
 // This file is kept for backward compatibility.
-// New code should import from "@/components/ryan-loader" directly.
+// New code should import from "@/components/spectra-loader" directly.
 
-export { RyanLoader as LMLoader, RyanLoader } from "@/components/ryan-loader";
-export { default } from "@/components/ryan-loader";
+export { SpectraLoader as LMLoader, SpectraLoader } from "@/components/spectra-loader";
+export { default } from "@/components/spectra-loader";
+

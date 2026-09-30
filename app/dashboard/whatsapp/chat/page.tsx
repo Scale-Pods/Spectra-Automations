@@ -32,7 +32,7 @@ import {
     ChevronRight,
     MoreHorizontal
 } from "lucide-react";
-import { LMLoader } from "@/components/ryan-loader";
+import { LMLoader } from "@/components/spectra-loader";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { subDays, startOfDay, endOfDay } from "date-fns";
 import { isTrueWpReply, getWpLeadDate } from "@/lib/reply-utils";
