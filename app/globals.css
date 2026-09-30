@@ -1,0 +1,269 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MACOS LIQUID GLASS / DYNAMIC GLASSMORPHISM THEME
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+    --bg-app:    #0b0f19;
+    --bg-layer1: rgba(255, 255, 255, 0.04);
+    --bg-layer2: rgba(255, 255, 255, 0.07);
+    --bg-layer3: rgba(255, 255, 255, 0.10);
+
+    --fill-primary:    rgba(255, 255, 255, 0.16);
+    --fill-secondary:  rgba(255, 255, 255, 0.12);
+    --fill-tertiary:   rgba(255, 255, 255, 0.08);
+    --fill-quaternary: rgba(255, 255, 255, 0.04);
+
+    --glass-fill:       rgba(255, 255, 255, 0.04);
+    --glass-fill-hover: rgba(255, 255, 255, 0.08);
+    --glass-blur:       blur(20px) saturate(180%);
+    --glass-border:     rgba(255, 255, 255, 0.1);
+    --glass-border-top: rgba(255, 255, 255, 0.2);
+    --glass-shadow:     0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    --glass-shadow-hover: 0 16px 40px -10px rgba(59, 130, 246, 0.25);
+
+    --label-primary:    rgba(255, 255, 255, 0.95);
+    --label-secondary:  rgba(226, 232, 240, 0.72);
+    --label-tertiary:   rgba(148, 163, 184, 0.50);
+    --label-quaternary: rgba(148, 163, 184, 0.25);
+
+    --separator:        rgba(255, 255, 255, 0.1);
+    --separator-opaque: rgba(255, 255, 255, 0.2);
+
+    /* Apple System Colours */
+    --blue:   #3B82F6;  --green:  #10B981;  --indigo: #6366F1;
+    --orange: #F59E0B;  --pink:   #EC4899;  --purple: #8B5CF6;
+    --red:    #EF4444;  --teal:   #06B6D4;  --yellow: #EAB308;
+
+    --background: 224 71% 4%;
+    --foreground: 0 0% 95%;
+    --card: 224 71% 7%;
+    --card-foreground: 0 0% 95%;
+    --popover: 224 71% 7%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 224 71% 10%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 224 71% 10%;
+    --muted-foreground: 220 9% 60%;
+    --accent: 224 71% 10%;
+    --accent-foreground: 0 0% 95%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 224 71% 15%;
+    --input: 224 71% 15%;
+    --ring: 217 91% 60%;
+    --radius: 18px;
+
+    /* Chart colours */
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 270 60% 60%;
+    --chart-4: 25 95% 53%;
+    --chart-5: 180 70% 50%;
+}
+
+.dark {
+    --bg-app:    #0b0f19;
+    --bg-layer1: rgba(255, 255, 255, 0.04);
+    --bg-layer2: rgba(255, 255, 255, 0.07);
+    --bg-layer3: rgba(255, 255, 255, 0.10);
+    --glass-fill:       rgba(255, 255, 255, 0.04);
+    --glass-fill-hover: rgba(255, 255, 255, 0.08);
+    --glass-blur:       blur(20px) saturate(180%);
+    --glass-border:     rgba(255, 255, 255, 0.1);
+    --glass-shadow:     0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    --label-primary:    rgba(255, 255, 255, 0.95);
+    --label-secondary:  rgba(226, 232, 240, 0.72);
+    --separator:        rgba(255, 255, 255, 0.1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BASE CANVAS & MULTI-COLOR AMBIENT GLOWS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+    * {
+        border-color: var(--separator);
+    }
+
+    html {
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+    }
+
+    body {
+        background-color: #0b0f19;
+        background-image:
+            radial-gradient(ellipse 100% 70% at 15% 0%,   rgba(30,58,138,0.22) 0%, transparent 60%),
+            radial-gradient(ellipse 80%  60% at 85% 100%, rgba(88,28,135,0.20) 0%, transparent 55%),
+            radial-gradient(ellipse 60%  50% at 50% 50%,  rgba(6,182,212,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse 70%  60% at 90% 10%,  rgba(16,185,129,0.06) 0%, transparent 45%);
+        background-attachment: fixed;
+        color: var(--label-primary);
+        letter-spacing: -0.011em;
+        line-height: 1.47;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        letter-spacing: -0.022em;
+        line-height: 1.21;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MACOS LIQUID GLASS COMPONENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+    /* Glassmorphic Cards & Containers */
+    .liquid-card, [class*="Card"] {
+        background: rgba(255, 255, 255, 0.04) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5) !important;
+        border-radius: 18px !important;
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    .liquid-card:hover, [class*="Card"]:hover {
+        transform: translateY(-4px) !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+        box-shadow: 0 16px 40px -10px rgba(59, 130, 246, 0.25) !important;
+    }
+
+    /* Sidebar Glass Panel */
+    aside, .glass-sidebar {
+        background: rgba(11, 15, 25, 0.65) !important;
+        backdrop-filter: blur(25px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+
+    /* Active Sidebar Item - Vivid Liquid Glass Pill */
+    .active-liquid-pill {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.35) 0%, rgba(99, 102, 241, 0.25) 100%) !important;
+        border: 1px solid rgba(147, 197, 253, 0.35) !important;
+        box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+        border-radius: 9999px !important;
+        color: #ffffff !important;
+    }
+
+    /* Inactive Sidebar Nav Hover */
+    .nav-item-glass {
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    .nav-item-glass:hover {
+        background: rgba(255, 255, 255, 0.10) !important;
+        transform: translateX(4px) !important;
+        color: #ffffff !important;
+    }
+
+    /* Pill-style Glass Tags with Glowing Dot */
+    .glass-pill-tag {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        padding: 3px 10px !important;
+        border-radius: 9999px !important;
+        background: rgba(255, 255, 255, 0.06) !important;
+        backdrop-filter: blur(16px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+    }
+
+    .glass-pill-tag:hover {
+        transform: translateY(-2px) !important;
+        background: rgba(255, 255, 255, 0.12) !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+    }
+
+    /* Buttons & Interactive Elements */
+    button, .glass-btn, [class*="Button"] {
+        border-radius: 12px;
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    button:hover, .glass-btn:hover, [class*="Button"]:hover {
+        transform: translateY(-2px);
+    }
+
+    button:active, .glass-btn:active, [class*="Button"]:active {
+        transform: scale(0.98) !important;
+    }
+
+    /* Glass Inputs */
+    input, select, textarea, .glass-input {
+        background: rgba(255, 255, 255, 0.05) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 12px !important;
+        transition: all 0.3s ease !important;
+        color: #ffffff !important;
+    }
+
+    input:focus, select:focus, textarea:focus, .glass-input:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25) !important;
+        outline: none !important;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHART OVERRIDES — Apple Style
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.recharts-xAxis .recharts-cartesian-axis-line,
+.recharts-yAxis .recharts-cartesian-axis-line,
+.recharts-xAxis .recharts-cartesian-axis-tick-line,
+.recharts-yAxis .recharts-cartesian-axis-tick-line { display: none; }
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 0.5;
+    stroke-dasharray: 3 6;
+}
+
+.recharts-text {
+    fill: rgba(226, 232, 240, 0.72);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SCROLLBAR — macOS Style
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar       { width: 8px; height: 8px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
