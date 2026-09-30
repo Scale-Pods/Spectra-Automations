@@ -45,7 +45,7 @@
     },
     "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
-        "@types/node": "^20.17.6",
+        "@types/node": "^24.0.0",
         "@types/nodemailer": "^8.0.0",
         "@types/react": "^18.3.12",
         "@types/react-dom": "^18.3.1",
@@ -62,5 +62,8 @@
         },
         "postcss": "8.5.10",
         "uuid": "11.0.3"
+    },
+    "engines": {
+        "node": ">=24.0.0"
     }
 }
