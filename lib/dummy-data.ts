@@ -29,7 +29,7 @@ export interface DummyLead {
 }
 
 export const SPECTRA_MASTER_METRICS = {
-    totalLeads: 1480,
+    totalLeads: 1490,
     totalEmailsSent: 12850,
     totalWaReachouts: 8920,
     totalReplies: 1240,
