@@ -9,35 +9,49 @@ import {
 // ─── Parse WhatsApp activity content into messages ────────────────────────────
 function parseActivityContent(content: string, summary?: string): any[] {
     if (!content) return [];
+    
+    let normalized = content.replace(/(User|AI|Agent|Bot|Template)\s*(?:\[([^\]]+)\])?\s*:/gi, '\n$&');
+
     const messages: any[] = [];
-    const lines = content.split('\n');
+    const lines = normalized.split('\n');
+    let currentMsg: any = null;
     let seq = 0;
-    let lastMessageKey = '';
+    let lastKey = '';
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
 
-        if (line.startsWith('Template: ')) {
-            const text = line.substring('Template: '.length).trim();
-            messages.push({ type: 'bot', content: text, label: 'Agent', date: null, sequence: ++seq });
-            lastMessageKey = 'bot';
-            continue;
-        }
+        if (/^W\.P_\d+$/i.test(line) || /^Stage\s*\d+/i.test(line)) continue;
 
-        if (line.startsWith('User: ')) {
-            const text = line.substring('User: '.length).trim();
-            const key = `user:${text}`;
-            if (key === lastMessageKey) continue;
-            messages.push({ type: 'user', content: text, label: 'User', date: null, sequence: ++seq });
-            lastMessageKey = key;
-            continue;
-        }
+        const match = line.match(/^(User|AI|Agent|Bot|Template)\s*(?:\[([^\]]+)\])?\s*:(.*)$/i);
+        if (match) {
+            const speaker = match[1].toUpperCase();
+            const rawTs = match[2] ? match[2].trim() : null;
+            const textPart = match[3] ? match[3].trim() : '';
 
-        if (line.startsWith('Agent : ') || line.startsWith('Agent: ')) {
-            const text = line.replace(/^Agent\s*:\s*/, '').trim();
-            messages.push({ type: 'bot', content: text, label: 'Agent', date: null, sequence: ++seq });
-            lastMessageKey = `bot:${text}`;
+            const isUser = speaker === 'USER';
+            let dateIso: string | null = null;
+            if (rawTs) {
+                const parsedDate = new Date(rawTs.includes('T') ? rawTs : rawTs.replace(' ', 'T'));
+                if (parsedDate && !isNaN(parsedDate.getTime())) {
+                    dateIso = parsedDate.toISOString();
+                }
+            }
+
+            const cleanText = textPart.replace(/\\$/, '').trim();
+            const key = `${speaker}:${cleanText}`;
+            if (key === lastKey && cleanText !== '') continue;
+            lastKey = key;
+
+            currentMsg = {
+                type: isUser ? ('user' as const) : ('bot' as const),
+                content: cleanText,
+                label: isUser ? 'User' : (speaker === 'TEMPLATE' ? 'Template' : 'Spectra AI'),
+                date: dateIso,
+                sequence: ++seq,
+            };
+            messages.push(currentMsg);
             continue;
         }
 
@@ -54,9 +68,26 @@ function parseActivityContent(content: string, summary?: string): any[] {
         }
 
         if (messages.length > 0) {
-            messages[messages.length - 1].content += '\n' + line;
+            const prev = messages[messages.length - 1];
+            prev.content = (prev.content ? prev.content + '\n' : '') + line;
+        } else {
+            currentMsg = {
+                type: 'bot' as const,
+                content: line.replace(/\\$/, '').trim(),
+                label: 'Spectra AI',
+                date: null as string | null,
+                sequence: ++seq,
+            };
+            messages.push(currentMsg);
         }
     }
+
+    messages.forEach(msg => {
+        if (msg.content) {
+            msg.content = msg.content.replace(/\\$/, '').trim();
+        }
+    });
+
     return messages;
 }
 
@@ -148,15 +179,15 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
     const outgoing = messages.filter(m => m.type === 'bot').length;
 
     return (
-        <div className="h-screen max-h-screen bg-[#0a0d14] text-white flex flex-col items-center justify-center p-3 md:p-6 relative overflow-hidden">
-            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-emerald-600/20 blur-[120px] pointer-events-none z-0" />
-            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-blue-600/15 blur-[120px] pointer-events-none z-0" />
+        <div className="h-screen max-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col items-center justify-center p-3 md:p-6 relative overflow-hidden">
+            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-emerald-400/10 blur-[120px] pointer-events-none z-0" />
+            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-teal-400/10 blur-[120px] pointer-events-none z-0" />
 
-            <div className="w-full max-w-6xl h-[85vh] max-h-[800px] bg-[#0d121f]/90 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl p-4 sm:p-5 flex flex-col relative z-10 overflow-hidden">
+            <div className="w-full max-w-6xl h-[85vh] max-h-[800px] bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-xl p-4 sm:p-5 flex flex-col relative z-10 overflow-hidden">
 
                 {/* ── Top Bar ── */}
                 <div className="mb-3 flex items-center justify-between shrink-0 flex-wrap gap-2">
-                    <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full font-semibold">
+                    <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full font-semibold">
                         📱 WhatsApp Conversation • {decodedLeadId}
                     </span>
                     <div className="flex items-center gap-2">

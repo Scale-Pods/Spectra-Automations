@@ -24,29 +24,54 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { useData } from "@/context/DataContext";
 import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 
-import { SPECTRA_RECEIVED_EMAILS } from "@/lib/dummy-data";
-
 export default function ReceivedEmailsPage() {
-    const loading = false;
+    const { leads: allLeads, loadingLeads } = useData();
+    const loading = loadingLeads;
     const [loopFilter, setLoopFilter] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
-    const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 7), to: new Date() });
+    const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 90), to: new Date() });
     const [sortBy, setSortBy] = useState("newest");
 
     const replies = useMemo(() => {
-        return SPECTRA_RECEIVED_EMAILS.map(r => ({
-            id: r.id,
-            sender: r.sender_email,
-            senderName: r.lead_name,
-            status: "Replied",
-            subject: r.subject,
-            timestamp: r.date,
-            content: r.preview,
-            originalDate: r.date,
-            loop: "Intro Campaign",
-            repliedToStep: "Cold Message #1"
-        }));
-    }, []);
+        const result: any[] = [];
+        allLeads.forEach((lead: any) => {
+            const hasReply = lead.email_reply &&
+                String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                String(JSON.stringify(lead.email_reply)) !== 'null' &&
+                String(JSON.stringify(lead.email_reply)) !== '""';
+
+            if (hasReply) {
+                const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
+                const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
+                let content = "Inbound email response received.";
+                if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
+                    const lastItem = lead.email_reply[lead.email_reply.length - 1];
+                    content = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
+                } else if (typeof lead.email_reply === 'object') {
+                    content = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
+                } else {
+                    content = String(lead.email_reply);
+                }
+                const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
+                const timestamp = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+
+                result.push({
+                    id: lead.id || `reply-${Math.random()}`,
+                    sender: senderEmail,
+                    senderName: leadName,
+                    status: "Replied",
+                    subject: lead.subject || "Re: Campaign Outreach",
+                    timestamp,
+                    content,
+                    originalDate: dateRaw || new Date().toISOString(),
+                    loop: lead.source_loop || lead.source_table || "Email Campaign",
+                    repliedToStep: "Outreach Email",
+                    rawLead: lead
+                });
+            }
+        });
+        return result;
+    }, [allLeads]);
 
 
 

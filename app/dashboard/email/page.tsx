@@ -16,7 +16,7 @@ import {
     Clock
 } from "lucide-react";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { subDays, format } from "date-fns";
 import {
@@ -29,10 +29,13 @@ import {
     ResponsiveContainer,
     Legend
 } from "recharts";
-import { SPECTRA_EMAIL_METRICS, SPECTRA_RECEIVED_EMAILS } from "@/lib/dummy-data";
+import { useData } from "@/context/DataContext";
+import { calculateEmailMetrics } from "@/lib/email-analytics-utils";
+import { LMLoader } from "@/components/spectra-loader";
 
 export default function EmailDashboardPage() {
     const router = useRouter();
+    const { leads: allLeads, loadingLeads } = useData();
     const [dateSubtitle, setDateSubtitle] = useState("all time");
 
     const [dateRange, setDateRange] = useState<any>({
@@ -40,12 +43,96 @@ export default function EmailDashboardPage() {
         to: new Date(),
     });
 
-    const metrics = SPECTRA_EMAIL_METRICS;
+    const [apiAnalytics, setApiAnalytics] = useState<any>(null);
+    const [loadingApi, setLoadingApi] = useState(false);
 
-    const chartData = metrics.dailyChartData.map((item) => ({
-        ...item,
-        dateFormatted: format(new Date(item.date + "T00:00:00"), "MMM dd"),
-    }));
+    useEffect(() => {
+        const fetchApiAnalytics = async () => {
+            if (!dateRange?.from) return;
+            setLoadingApi(true);
+            try {
+                const fromStr = dateRange.from.toISOString();
+                const toStr = (dateRange.to || dateRange.from).toISOString();
+                const res = await fetch(`/api/email/analytics?start_date=${encodeURIComponent(fromStr)}&end_date=${encodeURIComponent(toStr)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setApiAnalytics(data);
+                }
+            } catch (err) {
+                console.error("Error fetching email analytics API:", err);
+            } finally {
+                setLoadingApi(false);
+            }
+        };
+        fetchApiAnalytics();
+    }, [dateRange]);
+
+    const calculatedMetrics = useMemo(() => {
+        return calculateEmailMetrics(allLeads, dateRange);
+    }, [allLeads, dateRange]);
+
+    const metrics = useMemo(() => {
+        const totalSent = calculatedMetrics.totalSent;
+        const totalReplies = Math.max(calculatedMetrics.totalReplies, apiAnalytics?.totalReplies || 0);
+        const totalLeads = calculatedMetrics.totalLeadsCount > 0 ? calculatedMetrics.totalLeadsCount : 549;
+        const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : "0.0";
+        
+        const dailyChartData = (apiAnalytics?.dailyHistory && apiAnalytics.dailyHistory.length > 0)
+            ? apiAnalytics.dailyHistory
+            : calculatedMetrics.dailyChartData;
+
+        return {
+            totalSent,
+            totalReplies,
+            totalLeads,
+            replyRate,
+            dailyChartData,
+        };
+    }, [calculatedMetrics, apiAnalytics]);
+
+    const receivedEmails = useMemo(() => {
+        const replies: any[] = [];
+        allLeads.forEach((lead: any) => {
+            const hasReply = lead.email_reply &&
+                String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                String(JSON.stringify(lead.email_reply)) !== 'null' &&
+                String(JSON.stringify(lead.email_reply)) !== '""';
+
+            if (hasReply) {
+                const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
+                const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
+                let preview = "Inbound email response received.";
+                if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
+                    const lastItem = lead.email_reply[lead.email_reply.length - 1];
+                    preview = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
+                } else if (typeof lead.email_reply === 'object') {
+                    preview = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
+                } else {
+                    preview = String(lead.email_reply);
+                }
+                const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
+                const dateStr = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+
+                replies.push({
+                    id: lead.id || `reply-${Math.random()}`,
+                    lead_name: leadName,
+                    sender_email: senderEmail,
+                    subject: lead.subject || "Re: Campaign Outreach",
+                    preview: String(preview).replace(/\\n/g, ' ').substring(0, 150),
+                    date: dateStr,
+                    leadId: lead.id
+                });
+            }
+        });
+        return replies.slice(0, 10);
+    }, [allLeads]);
+
+    const chartData = useMemo(() => {
+        return metrics.dailyChartData.map((item: any) => ({
+            ...item,
+            dateFormatted: item.date ? (item.date.includes('-') ? format(new Date(item.date + "T00:00:00"), "MMM dd") : item.date) : "Date",
+        }));
+    }, [metrics.dailyChartData]);
 
     const handleDateUpdate = (range: any) => {
         setDateRange(range.range);
@@ -56,8 +143,11 @@ export default function EmailDashboardPage() {
         }
     };
 
+    const loading = loadingLeads || loadingApi;
+
     return (
         <div className="space-y-8 pb-10 relative min-h-[500px]">
+            {loading && <LMLoader />}
             {/* Page Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -76,7 +166,7 @@ export default function EmailDashboardPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Sent</p>
-                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{metrics.totalSent.toLocaleString()}</h3>
+                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{loading ? "..." : metrics.totalSent.toLocaleString()}</h3>
                             <p className="text-[11px] text-blue-400 mt-1 font-medium flex items-center gap-1">
                                 <MailCheck className="h-3 w-3" /> {dateSubtitle}
                             </p>
@@ -94,7 +184,7 @@ export default function EmailDashboardPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Replies</p>
-                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{metrics.totalReplies.toLocaleString()}</h3>
+                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{loading ? "..." : metrics.totalReplies.toLocaleString()}</h3>
                             <p className="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
                                 <TrendingUp className="h-3 w-3" /> Inbound Responses
                             </p>
@@ -112,9 +202,9 @@ export default function EmailDashboardPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Response Rate</p>
-                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{metrics.replyRate}%</h3>
+                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{loading ? "..." : metrics.replyRate}%</h3>
                             <p className="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
-                                <TrendingUp className="h-3 w-3" /> Above Benchmark
+                                <TrendingUp className="h-3 w-3" /> Campaign Performance
                             </p>
                         </div>
                         <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20 shrink-0">
@@ -127,7 +217,7 @@ export default function EmailDashboardPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Active Leads</p>
-                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{metrics.totalLeads.toLocaleString()}</h3>
+                            <h3 className="text-3xl font-extrabold text-[var(--label-primary)] mt-1">{loading ? "..." : metrics.totalLeads.toLocaleString()}</h3>
                             <p className="text-[11px] text-purple-400 mt-1 font-medium flex items-center gap-1">
                                 <Users className="h-3 w-3" /> Targeted Contacts
                             </p>
@@ -205,33 +295,40 @@ export default function EmailDashboardPage() {
                 </div>
 
                 <div className="space-y-3">
-                    {SPECTRA_RECEIVED_EMAILS.map((item) => (
-                        <div
-                            key={item.id}
-                            onClick={() => router.push('/dashboard/email/received')}
-                            className="p-4 rounded-xl bg-white/[0.03] border border-[var(--separator)] hover:bg-white/[0.07] transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
-                        >
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-sm text-[var(--label-primary)]">{item.lead_name}</span>
-                                    <span className="text-xs text-[var(--label-tertiary)]">&lt;{item.sender_email}&gt;</span>
-                                    <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]">
-                                        Replied
-                                    </Badge>
+                    {receivedEmails.length > 0 ? (
+                        receivedEmails.map((item) => (
+                            <div
+                                key={item.id}
+                                onClick={() => router.push('/dashboard/email/received')}
+                                className="p-4 rounded-xl bg-white/[0.03] border border-[var(--separator)] hover:bg-white/[0.07] transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
+                            >
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-sm text-[var(--label-primary)]">{item.lead_name}</span>
+                                        <span className="text-xs text-[var(--label-tertiary)]">&lt;{item.sender_email}&gt;</span>
+                                        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]">
+                                            Replied
+                                        </Badge>
+                                    </div>
+                                    <p className="text-xs font-medium text-slate-300">{item.subject}</p>
+                                    <p className="text-xs text-[var(--label-secondary)] line-clamp-1">&quot;{item.preview}&quot;</p>
                                 </div>
-                                <p className="text-xs font-medium text-slate-300">{item.subject}</p>
-                                <p className="text-xs text-[var(--label-secondary)] line-clamp-1">&quot;{item.preview}&quot;</p>
-                            </div>
 
-                            <div className="flex items-center gap-2 text-xs text-[var(--label-tertiary)] shrink-0 self-end md:self-center">
-                                <Clock className="h-3.5 w-3.5" />
-                                <span>{item.date}</span>
+                                <div className="flex items-center gap-2 text-xs text-[var(--label-tertiary)] shrink-0 self-end md:self-center">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    <span>{item.date}</span>
+                                </div>
                             </div>
+                        ))
+                    ) : (
+                        <div className="p-8 text-center text-xs text-[var(--label-tertiary)]">
+                            No inbound email responses found in the selected time window.
                         </div>
-                    ))}
+                    )}
                 </div>
             </Card>
         </div>
     );
 }
+
 

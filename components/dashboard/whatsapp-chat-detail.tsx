@@ -32,86 +32,85 @@ function parseActivityContent(content: string, summary?: string): any[] {
         }
         return [];
     }
+    
+    // Ensure speaker headers starting on glued lines are split into separate lines
+    let normalized = content.replace(/(User|AI|Agent|Bot|Template)\s*(?:\[([^\]]+)\])?\s*:/gi, '\n$&');
+
     const messages: any[] = [];
-    const lines = content.split('\n');
+    const lines = normalized.split('\n');
+    let currentMsg: any = null;
     let seq = 0;
-    let lastMessageKey = '';
+    let lastKey = '';
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
 
-        // Template message — first message
-        if (line.startsWith('Template: ')) {
-            const text = cleanMessageContent(line.substring('Template: '.length), 'Outreach Message');
-            const msg = {
-                type: 'bot' as const,
-                content: text,
-                label: 'Agent',
-                date: null as string | null,
+        // Skip standalone stage headers like W.P_1, Stage 1
+        if (/^W\.P_\d+$/i.test(line) || /^Stage\s*\d+/i.test(line)) continue;
+
+        // Check for speaker headers like User [2026-10-06 17:23]: or AI [timestamp]: or User: or Agent:
+        const match = line.match(/^(User|AI|Agent|Bot|Template)\s*(?:\[([^\]]+)\])?\s*:(.*)$/i);
+        if (match) {
+            const speaker = match[1].toUpperCase();
+            const rawTs = match[2] ? match[2].trim() : null;
+            const textPart = match[3] ? match[3].trim() : '';
+
+            const isUser = speaker === 'USER';
+            let dateIso: string | null = null;
+            if (rawTs) {
+                const parsedDate = parseMsgDate(rawTs) || new Date(rawTs.includes('T') ? rawTs : rawTs.replace(' ', 'T'));
+                if (parsedDate && !isNaN(parsedDate.getTime())) {
+                    dateIso = parsedDate.toISOString();
+                }
+            }
+
+            const cleanText = textPart ? cleanMessageContent(textPart, isUser ? 'User Reply' : 'Outreach Message') : '';
+            const key = `${speaker}:${cleanText}`;
+            if (key === lastKey && cleanText !== '') continue;
+            lastKey = key;
+
+            currentMsg = {
+                type: isUser ? ('user' as const) : ('bot' as const),
+                content: cleanText,
+                label: isUser ? 'User' : (speaker === 'TEMPLATE' ? 'Template' : 'Spectra AI'),
+                date: dateIso,
                 sequence: ++seq,
             };
-            messages.push(msg);
-            lastMessageKey = 'bot';
+            messages.push(currentMsg);
             continue;
         }
 
-        // User message
-        if (line.startsWith('User: ')) {
-            const text = cleanMessageContent(line.substring('User: '.length), 'User Reply');
-            const key = `user:${text}`;
-            if (key === lastMessageKey) continue;
-            const msg = {
-                type: 'user' as const,
-                content: text,
-                label: 'User',
-                date: null as string | null,
-                sequence: ++seq,
-            };
-            messages.push(msg);
-            lastMessageKey = key;
-            continue;
-        }
-
-        // Agent message
-        if (line.startsWith('Agent : ') || line.startsWith('Agent: ')) {
-            const text = cleanMessageContent(line.replace(/^Agent\s*:\s*/, ''), 'Agent Message');
-            const msg = {
-                type: 'bot' as const,
-                content: text,
-                label: 'Agent',
-                date: null as string | null,
-                sequence: ++seq,
-            };
-            messages.push(msg);
-            lastMessageKey = `bot:${text}`;
-            continue;
-        }
-
-        // Timestamp line — attach to previous message
+        // Check for timestamp lines
         const parsedDate = parseMsgDate(line);
         if (parsedDate && messages.length > 0) {
-            messages[messages.length - 1].date = parsedDate.toISOString();
+            if (!messages[messages.length - 1].date) {
+                messages[messages.length - 1].date = parsedDate.toISOString();
+            }
             continue;
         }
 
-        // Continuation of previous message content or fallback initial message
+        // Continuation of current message content or fallback initial message
         if (messages.length > 0) {
-            messages[messages.length - 1].content += '\n' + line;
+            const prev = messages[messages.length - 1];
+            prev.content = (prev.content ? prev.content + '\n' : '') + line;
         } else {
-            messages.push({
+            const cleanText = cleanMessageContent(line, 'Outreach Message');
+            currentMsg = {
                 type: 'bot' as const,
-                content: line,
-                label: 'Agent',
+                content: cleanText,
+                label: 'Spectra AI',
                 date: null as string | null,
                 sequence: ++seq,
-            });
+            };
+            messages.push(currentMsg);
         }
     }
 
-    // Clean up trailing date markers and ensure content is never empty
+    // Clean up message contents
     messages.forEach(msg => {
         if (msg.content) {
+            msg.content = msg.content.replace(/\\$/, '').trim();
             msg.content = cleanMessageContent(msg.content, summary || (msg.type === 'user' ? 'Lead Replied' : 'Outreach Message'));
         }
     });
@@ -266,8 +265,9 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                 const f = found as any;
                 let timeline: any[] = [];
 
-                if (f.content) {
-                    timeline = parseActivityContent(f.content, f.summary);
+                const rawContent = f.content || f.WA_text || f.whatsapp_text || f["WA_text"];
+                if (rawContent) {
+                    timeline = parseActivityContent(rawContent, f.summary || f.WA_note);
                 } else {
                     const parseMsg = (raw: any, label: string, type: 'bot' | 'user', sequence: number) => {
                         if (!raw || !String(raw).trim()) return null;
@@ -413,8 +413,12 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                     </div>
                     <div className="flex items-center gap-2 text-xs text-[var(--label-secondary)] mt-0.5">
                         <span>{lead.phone}</span>
-                        <span>•</span>
-                        <span>{lead.source_loop}</span>
+                        {lead.email && (
+                            <>
+                                <span>•</span>
+                                <span>{lead.email}</span>
+                            </>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -472,8 +476,18 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                                             : 'bg-emerald-600 text-white rounded-tr-none'
                                             }`}>
                                             <div className="flex items-center justify-between mb-2 gap-3">
-                                                <span className={`text-[10px] font-bold uppercase tracking-wide ${msg.type === 'user' ? 'text-[var(--label-tertiary)]' : 'text-emerald-100'}`}>
-                                                    {msg.label}
+                                                <span className={`text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 ${msg.type === 'user' ? 'text-[var(--label-tertiary)]' : 'text-emerald-100'}`}>
+                                                    {msg.type === 'user' ? (
+                                                        <>
+                                                            <User className="h-3 w-3" />
+                                                            <span>{msg.label || 'User'}</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Bot className="h-3 w-3" />
+                                                            <span>{msg.label || 'Spectra AI'}</span>
+                                                        </>
+                                                    )}
                                                 </span>
                                                 {tsPill}
                                             </div>

@@ -15,7 +15,7 @@ export interface ConsolidatedLead {
     current_loop: string;
     source_loop: string;
     stages_passed: string[];
-    stage_data: Record<string, any>; // Stores raw column values for each stage
+    stage_data: Record<string, any>;
     created_at: string;
     updated_at: string;
     last_contacted?: string;
@@ -54,6 +54,15 @@ function getWhatsAppHistory(l: any) {
     return history;
 }
 
+function checkIsReplied(val: any): boolean {
+    if (!val) return false;
+    const str = String(val).trim().toLowerCase();
+    if (str === '' || str === 'no' || str === 'false' || str === 'null' || str === 'undefined') {
+        return false;
+    }
+    return true;
+}
+
 export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
     const consolidatedLeads: ConsolidatedLead[] = [];
 
@@ -63,11 +72,10 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
             const stages: string[] = [];
             const stage_data: Record<string, any> = {};
 
-            // Direct access — no getVal normalization, read ONLY Email_1/2/3 underscore columns
             ["Email_1", "Email_2", "Email_3"].forEach((key) => {
-                const val = l[key]; // direct property access — no fallback to "Email 1"
+                const val = l[key];
                 if (val !== undefined && val !== null && String(val).trim() !== "") {
-                    stages.push(key);          // stage name = "Email_1" (matches column)
+                    stages.push(key);
                     stage_data[key] = val;
                 }
             });
@@ -91,33 +99,36 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
                 }
             });
 
+            const isReplied = checkIsReplied(l.WA_replied || l.replied || l.WP_Replied_track);
+
             consolidatedLeads.push({
-                id: `intro-${getVal(l, ["Lead ID", "id"]) || idx}`,
-                lead_id: getVal(l, ["Lead ID"]),
-                name: String(getVal(l, ["Name"]) || "Lead"),
-                phone: String(getVal(l, ["Phone"]) || ""),
-                email: String(getVal(l, ["Email"]) || "No Email"),
-                replied: String(getVal(l, ["Replied", "W.P_Replied"]) || "No"),
+                ...l, // Preserve ALL database row properties (WA_text, WA_sentiment, WA_note, quotes, etc.)
+                id: `intro-${l.id || getVal(l, ["Lead ID"]) || idx}`,
+                lead_id: l.id || getVal(l, ["Lead ID"]),
+                name: String(l.full_name || l.customer_name || getVal(l, ["Name"]) || "Lead"),
+                phone: String(l.phone_e164 || l.mobile_raw || getVal(l, ["Phone"]) || ""),
+                email: String(l.email || getVal(l, ["Email"]) || "No Email"),
+                replied: isReplied ? (l.WA_replied || "Yes") : "No",
                 current_loop: "Intro",
                 source_loop: "Intro",
                 stages_passed: stages,
                 stage_data,
-                created_at: getVal(l, ["Created At", "created_at"]) || new Date().toISOString(),
-                updated_at: getVal(l, ["Updated At", "updated_at"]),
-                last_contacted: getVal(l, ["Last Contacted", "last_contacted"]),
+                created_at: l.created_at || l.eworks_created_on || getVal(l, ["Created At"]) || new Date().toISOString(),
+                updated_at: l.updated_at || l.eworks_last_updated_on || getVal(l, ["Updated At"]),
+                last_contacted: l.last_contacted_at || getVal(l, ["Last Contacted"]),
                 sender_email: getVal(l, ["Senders email", "sender_email"]),
                 email_replied: l["Email_Replied"] ?? null,
-                whatsapp_replied: getVal(l, ["W.P_Replied", "Replied", "whatsapp_replied"]),
-                "W.P_1": getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1", "W.P_FollowUp"]),
+                whatsapp_replied: isReplied ? (l.WA_replied || "Replied") : null,
+                "W.P_1": l.WA_text || getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1"]),
                 "W.P_2": getVal(l, ["W.P_2", "WhatsApp 2"]),
                 "W.P_3": getVal(l, ["W.P_3", "WhatsApp 3"]),
                 "W.P_4": getVal(l, ["W.P_4", "WhatsApp 4"]),
                 "W.P_FollowUp": getVal(l, ["W.P_FollowUp"]),
-                "W.P_Replied": getVal(l, ["W.P_Replied", "whatsapp_replied"]),
+                "W.P_Replied": isReplied ? (l.WA_replied || "Replied") : null,
                 "W.P_1 TS": getVal(l, ["W.P_1 TS", "WhatsApp 1 TS", "W.P_FollowUp TS", "WP_FollowUp TS"]),
                 "W.P_2 TS": getVal(l, ["W.P_2 TS", "WhatsApp 2 TS"]),
                 unsubscribed: getVal(l, ["Unsubscribed", "Unsubscribed text"]) || "No",
-                WP_Replied_track: getVal(l, ["WP_Replied_track"]) || null,
+                WP_Replied_track: isReplied ? (l.WA_replied || "Replied") : null,
                 ...getWhatsAppHistory(l)
             });
         });
@@ -129,12 +140,11 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
             const stages: string[] = [];
             const stage_data: Record<string, any> = {};
 
-            // Direct access — read ONLY Email_1/2/3 underscore columns from followup
             for (let i = 1; i <= 3; i++) {
                 const key = `Email_${i}`;
-                const val = l[key]; // direct — no normalization fallback
+                const val = l[key];
                 if (val !== undefined && val !== null && String(val).trim() !== "") {
-                    stages.push(key);          // stage name = "Email_1" etc.
+                    stages.push(key);
                     stage_data[key] = val;
                 }
             }
@@ -154,36 +164,39 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
                 stage_data["WhatsApp FollowUp"] = wpVal;
             }
 
+            const isReplied = checkIsReplied(l.WA_replied || l.replied || l.WP_Replied_track);
+
             consolidatedLeads.push({
-                id: `followup-${getVal(l, ["Lead ID", "id"]) || idx}`,
-                lead_id: getVal(l, ["Lead ID"]),
-                name: String(getVal(l, ["Name"]) || "Lead"),
-                phone: String(getVal(l, ["Phone"]) || ""),
-                email: String(getVal(l, ["Email"]) || "No Email"),
-                replied: String(getVal(l, ["Replied", "Email_Replied"]) || "No"),
+                ...l, // Preserve ALL database row properties
+                id: `followup-${l.id || getVal(l, ["Lead ID"]) || idx}`,
+                lead_id: l.id || getVal(l, ["Lead ID"]),
+                name: String(l.full_name || l.customer_name || getVal(l, ["Name"]) || "Lead"),
+                phone: String(l.phone_e164 || l.mobile_raw || getVal(l, ["Phone"]) || ""),
+                email: String(l.email || getVal(l, ["Email"]) || "No Email"),
+                replied: isReplied ? (l.WA_replied || "Yes") : "No",
                 current_loop: "Follow Up",
                 source_loop: "Follow Up",
                 stages_passed: stages,
                 stage_data,
-                created_at: getVal(l, ["Created At", "created_at"]) || new Date().toISOString(),
-                updated_at: getVal(l, ["Updated At", "updated_at"]),
-                last_contacted: getVal(l, ["Last Contacted"]),
+                created_at: l.created_at || l.eworks_created_on || getVal(l, ["Created At"]) || new Date().toISOString(),
+                updated_at: l.updated_at || l.eworks_last_updated_on || getVal(l, ["Updated At"]),
+                last_contacted: l.last_contacted_at || getVal(l, ["Last Contacted"]),
                 dropped: getVal(l, ["Dropped"]),
                 sender_email: getVal(l, ["Senders email"]),
                 email_replied: l["Email_Replied"] ?? null,
-                whatsapp_replied: getVal(l, ["W.P_Replied", "Replied", "whatsapp_replied"]),
-                "W.P_1": getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1", "W.P_FollowUp"]),
+                whatsapp_replied: isReplied ? (l.WA_replied || "Replied") : null,
+                "W.P_1": l.WA_text || getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1"]),
                 "W.P_2": getVal(l, ["W.P_2", "WhatsApp 2"]),
                 "W.P_3": getVal(l, ["W.P_3", "WhatsApp 3"]),
                 "W.P_4": getVal(l, ["W.P_4", "WhatsApp 4"]),
                 "W.P_FollowUp": getVal(l, ["W.P_FollowUp"]),
-                "W.P_Replied": getVal(l, ["W.P_Replied", "whatsapp_replied"]),
+                "W.P_Replied": isReplied ? (l.WA_replied || "Replied") : null,
                 "W.P_1 TS": getVal(l, ["W.P_1 TS", "W.P_1  TS", "WhatsApp 1 TS", "W.P_FollowUp TS", "WP_FollowUp TS"]),
                 "W.P_2 TS": getVal(l, ["W.P_2 TS", "WhatsApp 2 TS"]),
                 "W.P_3 TS": getVal(l, ["W.P_3 TS"]),
                 "W.P_4 TS": getVal(l, ["W.P_4 TS"]),
                 unsubscribed: getVal(l, ["Unsubscribed", "Unsubscribed text"]) || "No",
-                WP_Replied_track: getVal(l, ["WP_Replied_track"]) || null,
+                WP_Replied_track: isReplied ? (l.WA_replied || "Replied") : null,
                 ...getWhatsAppHistory(l)
             });
         });
@@ -195,12 +208,11 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
             const stages: string[] = [];
             const stage_data: Record<string, any> = {};
 
-            // Direct access — read ONLY Email_1 through Email_9 underscore columns from nurture
             for (let i = 1; i <= 9; i++) {
                 const key = `Email_${i}`;
-                const val = l[key]; // direct — no normalization fallback
+                const val = l[key];
                 if (val !== undefined && val !== null && String(val).trim() !== "") {
-                    stages.push(key);          // stage name = "Email_1" etc.
+                    stages.push(key);
                     stage_data[key] = val;
                 }
             }
@@ -234,26 +246,29 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
             if (getVal(l, ["Week 2"])) currentWeek = "Week 2";
             if (getVal(l, ["Week 3"])) currentWeek = "Week 3";
 
+            const isReplied = checkIsReplied(l.WA_replied || l.replied || l.WP_Replied_track);
+
             consolidatedLeads.push({
-                id: `nurture-${getVal(l, ["Lead ID", "id"]) || idx}`,
-                lead_id: getVal(l, ["Lead ID"]),
-                name: String(getVal(l, ["Name"]) || "Lead"),
-                phone: String(getVal(l, ["Phone"]) || ""),
-                email: String(getVal(l, ["Email"]) || "No Email"),
-                replied: String(getVal(l, ["Replied", "Email_Replied", "W.P_Replied"]) || "No"),
+                ...l, // Preserve ALL database row properties
+                id: `nurture-${l.id || getVal(l, ["Lead ID"]) || idx}`,
+                lead_id: l.id || getVal(l, ["Lead ID"]),
+                name: String(l.full_name || l.customer_name || getVal(l, ["Name"]) || "Lead"),
+                phone: String(l.phone_e164 || l.mobile_raw || getVal(l, ["Phone"]) || ""),
+                email: String(l.email || getVal(l, ["Email"]) || "No Email"),
+                replied: isReplied ? (l.WA_replied || "Yes") : "No",
                 current_loop: "Nurture",
                 source_loop: "Nurture Loop",
                 stages_passed: stages,
                 stage_data,
                 current_week: currentWeek,
-                created_at: getVal(l, ["Created At", "created_at"]) || new Date().toISOString(),
-                updated_at: getVal(l, ["Updated At", "updated_at"]),
-                last_contacted: getVal(l, ["Last Contacted"]),
+                created_at: l.created_at || l.eworks_created_on || getVal(l, ["Created At"]) || new Date().toISOString(),
+                updated_at: l.updated_at || l.eworks_last_updated_on || getVal(l, ["Updated At"]),
+                last_contacted: l.last_contacted_at || getVal(l, ["Last Contacted"]),
                 dropped: getVal(l, ["Dropped"]),
                 sender_email: getVal(l, ["Senders email"]),
                 email_replied: l["Email_Replied"] ?? null,
-                whatsapp_replied: getVal(l, ["W.P_Replied", "Replied", "whatsapp_replied"]),
-                "W.P_1": getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1", "W.P_FollowUp"]),
+                whatsapp_replied: isReplied ? (l.WA_replied || "Replied") : null,
+                "W.P_1": l.WA_text || getVal(l, ["W.P_1", "WhatsApp 1", "WhatsApp_1"]),
                 "W.P_2": getVal(l, ["W.P_2", "WhatsApp 2"]),
                 "W.P_3": getVal(l, ["W.P_3", "WhatsApp 3"]),
                 "W.P_4": getVal(l, ["W.P_4", "WhatsApp 4"]),
@@ -266,7 +281,7 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
                 "W.P_11": getVal(l, ["W.P_11"]),
                 "W.P_12": getVal(l, ["W.P_12"]),
                 "W.P_FollowUp": getVal(l, ["W.P_FollowUp"]),
-                "W.P_Replied": getVal(l, ["W.P_Replied", "whatsapp_replied"]),
+                "W.P_Replied": isReplied ? (l.WA_replied || "Replied") : null,
                 "W.P_1 TS": getVal(l, ["W.P_1 TS", "WhatsApp 1 TS", "W.P_FollowUp TS", "WP_FollowUp TS"]),
                 "W.P_2 TS": getVal(l, ["W.P_2 TS", "WhatsApp 2 TS"]),
                 "W.P_3 TS": getVal(l, ["W.P_3 TS"]),
@@ -274,7 +289,7 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
                 "W.P_5 TS": getVal(l, ["W.P_5 TS"]),
                 "W.P_6 TS": getVal(l, ["W.P_6 TS"]),
                 unsubscribed: getVal(l, ["Unsubscribed", "Unsubscribed text"]) || "No",
-                WP_Replied_track: getVal(l, ["WP_Replied_track"]) || null,
+                WP_Replied_track: isReplied ? (l.WA_replied || "Replied") : null,
                 ...getWhatsAppHistory(l)
             });
         });
@@ -283,40 +298,36 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
     // 4. Map master_leads
     if (Array.isArray((data as any).master_leads)) {
         (data as any).master_leads.forEach((l: any, idx: number) => {
+            const isReplied = checkIsReplied(l.WA_replied || l.replied || l.WP_Replied_track);
             consolidatedLeads.push({
-                id: `master-${getVal(l, ["Lead ID", "id"]) || idx}`,
-                name: String(getVal(l, ["Name", "name"]) || "Lead"),
-                phone: String(getVal(l, ["Phone", "phone", "phoneNumber", "customer_number"]) || ""),
-                email: String(getVal(l, ["Email", "email"]) || "No Email"),
-                replied: "No",
+                ...l, // Preserve ALL database row properties
+                id: `master-${l.id || getVal(l, ["Lead ID"]) || idx}`,
+                name: String(l.full_name || l.customer_name || getVal(l, ["Name"]) || "Lead"),
+                phone: String(l.phone_e164 || l.mobile_raw || getVal(l, ["Phone"]) || ""),
+                email: String(l.email || getVal(l, ["Email"]) || "No Email"),
+                replied: isReplied ? (l.WA_replied || "Yes") : "No",
                 current_loop: "Master",
                 source_loop: "Master Leads",
                 stages_passed: [],
                 stage_data: {},
-                created_at: getVal(l, ["Created At", "created_at"]) || new Date().toISOString(),
-                updated_at: getVal(l, ["Updated At", "updated_at"]),
-                lead_status: getVal(l, ["lead_status", "Lead Status"])
+                created_at: l.created_at || l.eworks_created_on || getVal(l, ["Created At"]) || new Date().toISOString(),
+                updated_at: l.updated_at || l.eworks_last_updated_on || getVal(l, ["Updated At"]),
+                lead_status: l.decision_status || getVal(l, ["lead_status", "Lead Status"])
             });
         });
     }
 
-    // 5. Map activity_leads (from aspen_activity, fello_activity, naples_activity, old_activity)
+    // 5. Map activity_leads
     if (Array.isArray((data as any).activity_leads)) {
         (data as any).activity_leads.forEach((act: any, idx: number) => {
-            const rVal = String(act.replied ?? '').toLowerCase().trim();
-            const isActivityReplied =
-                rVal === 'yes' ||
-                rVal === 'true' ||
-                rVal === '1' ||
-                (act.status && String(act.status).toLowerCase().includes('reply')) ||
-                (act.status && String(act.status).toLowerCase().includes('replied')) ||
-                !!act.replied_at;
+            const isActivityReplied = checkIsReplied(act.replied || act.WA_replied || act.status || act.replied_at);
 
             consolidatedLeads.push({
+                ...act,
                 id: act.id ? `act-${act._source_table || 'tbl'}-${act.id}` : `act-${idx}`,
                 lead_id: act.lead_id || act.id,
-                name: String(act.lead_name || act.customer_name || "Lead"),
-                phone: String(act.lead_phone || act.customer_phone || ""),
+                name: String(act.lead_name || act.customer_name || act.full_name || "Lead"),
+                phone: String(act.lead_phone || act.customer_phone || act.phone_e164 || ""),
                 email: String(act.lead_email || act.email || "No Email"),
                 replied: isActivityReplied ? 'Yes' : 'No',
                 current_loop: act._source_table || act.channel || "Activity Stream",
@@ -337,10 +348,10 @@ export function consolidateLeads(data: RawLeadsResponse): ConsolidatedLead[] {
                 workflow_name: act.workflow_name,
                 replied_at: act.replied_at,
                 unsubscribed: act.unsubscribed || (act.status && String(act.status).toLowerCase().includes('unsubscribed') ? 'Yes' : 'No'),
-                ...act
             });
         });
     }
 
     return consolidatedLeads;
 }
+

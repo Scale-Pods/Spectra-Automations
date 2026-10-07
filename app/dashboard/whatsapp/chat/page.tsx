@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -233,15 +233,14 @@ async function fetchWALeadsData(from: Date, to: Date): Promise<{ nr_wf: any[]; f
     return res.json();
 }
 
-import { SPECTRA_DUMMY_LEADS } from "@/lib/dummy-data";
-
 export default function WhatsappChatPage() {
-    const [leads, setLeads] = useState<any[]>(SPECTRA_DUMMY_LEADS);
+    const [leads, setLeads] = useState<any[]>([]);
     const [waOwners, setWaOwners] = useState<any[]>([]);
-    const loadingWA = false;
-    const loading = false;
+    const [loadingWA, setLoadingWA] = useState(true);
+    const loading = loadingWA;
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedLeadObj, setSelectedLeadObj] = useState<any | null>(null);
+
     const getStandardTemplates = (loops: string[]) => {
         const result: any[] = [];
         if (loops.includes("Intro")) {
@@ -287,9 +286,59 @@ export default function WhatsappChatPage() {
     };
 
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 7),
+        from: subDays(new Date(), 90),
         to: new Date(),
     });
+
+    const loadRealWaData = useCallback(async (from: Date, to: Date) => {
+        setLoadingWA(true);
+        try {
+            const data = await fetchWALeadsData(from, to);
+            const nr_wf = (data.nr_wf || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Intro" }));
+            const followup = (data.followup || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Follow Up" }));
+            const nurture = (data.nurture || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Nurture" }));
+            const owners = (data.owners || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Owners" }));
+            const waActivity = (data.wa_activity || []).map((a: any) => ({
+                ...a,
+                source_loop: "Activity",
+                "Name": a.lead_name || a.name || "Lead",
+                "Phone": a.lead_phone || a.phone || "",
+                "W.P_1": a.created_at || true,
+                wp1_parsed_date: a.created_at,
+                "WP_Replied_track": (a.replied_at || a.status === "completed" || a.status === "replied" || a.replied) ? "Replied" : "",
+                status: a.status || "sent"
+            }));
+            const mergedRaw = [...nr_wf, ...followup, ...waActivity];
+            const seen = new Set<string>();
+            const mergedLeads: any[] = [];
+            mergedRaw.forEach((l: any) => {
+                const waText = l.WA_text || l["W.P_1"] || l.whatsapp_1;
+                const hasWaText = (waText && String(waText).trim() !== '' && String(waText).trim() !== 'null' && String(waText).trim() !== 'undefined') ||
+                    !!(l.whatsapp_2 || l.whatsapp_3 || l.whatsapp_4 || l["W.P_2"] || l["W.P_3"] || isTrueWpReply(l));
+                
+                if (!hasWaText) return;
+
+                const phoneClean = String(l.phone_e164 || l.phone || l.Phone || '').replace(/\D/g, '');
+                const key = phoneClean.length >= 7 ? phoneClean : String(l.id || l["Lead ID"] || Math.random());
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    mergedLeads.push(l);
+                }
+            });
+            setLeads(mergedLeads);
+            setWaOwners(owners);
+        } catch (err) {
+            console.error('Error fetching WA chat page data:', err);
+        } finally {
+            setLoadingWA(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (dateRange?.from) {
+            loadRealWaData(dateRange.from, dateRange.to || dateRange.from);
+        }
+    }, [dateRange, loadRealWaData]);
 
     const [currentPage, setCurrentPage] = useState(1);
     const leadsPerPage = 10;
@@ -370,6 +419,11 @@ export default function WhatsappChatPage() {
     const filteredLeads = useMemo(() => {
         return leadsInRange.filter(l => {
             const lead = l as any;
+            const waText = lead.WA_text || lead["W.P_1"] || lead.whatsapp_1;
+            const hasWaContent = (waText && String(waText).trim() !== '' && String(waText).trim() !== 'null' && String(waText).trim() !== 'undefined') ||
+                !!(lead.whatsapp_2 || lead.whatsapp_3 || lead.whatsapp_4 || lead["W.P_2"] || lead["W.P_3"] || isTrueWpReply(lead));
+            if (!hasWaContent) return false;
+
             // WA endpoint returns "Name" / "Phone" (uppercase keys from DB columns)
             const name = String(lead["Name"] || lead.name || "").toLowerCase();
             const phone = String(lead["Phone"] || lead.phone || "");
@@ -503,70 +557,37 @@ export default function WhatsappChatPage() {
         let uniqueSentCount = 0;
 
         if (activeTab === "leads") {
-            uniqueSentCount = filteredLeads.length;
-
+            let leadsWithSentMsg = 0;
             filteredLeads.forEach(l => {
                 const lead = l as any;
-                if (lead.source_loop === "Activity") {
-                    if (lead.content) {
-                        const lines = String(lead.content).split('\n');
-                        for (const line of lines) {
-                            const trimmed = line.trim();
-                            if (trimmed.startsWith('Template:') || trimmed.startsWith('User:') || trimmed.startsWith('Agent:') || trimmed.startsWith('Agent :')) {
-                                sentCount++;
-                            }
-                        }
+                let leadSent = 0;
+                if (lead.WA_text && String(lead.WA_text).trim() !== '' && String(lead.WA_text).trim() !== 'null') {
+                    leadSent++;
+                }
+                ['whatsapp_1', 'whatsapp_2', 'whatsapp_3', 'whatsapp_4'].forEach(col => {
+                    if (lead[col] && String(lead[col]).trim() !== '' && String(lead[col]).trim() !== 'null') {
+                        leadSent++;
                     }
-                    const actStatus = String(lead.status || lead.action_type || '').toLowerCase();
-                    const actErr = lead.Error || lead.error || lead.error_message || lead.errorMessage;
-                    if (actStatus.includes("failed") || actStatus.includes("error") || (actErr && String(actErr).trim())) {
-                        failedCount++;
-                    }
-                } else {
-                    let leadHasFailedMsg = false;
-                    for (let i = 1; i <= 12; i++) {
-                        if (lead[`W.P_${i}`]) {
-                            sentCount++;
-                            const ts = lead[`W.P_${i} TS`] || lead[`W.P_${i}_TS`];
-                            if (ts && typeof ts === 'string') {
-                                const low = ts.toLowerCase();
-                                if (low.includes("failed") || low.includes("error") || low.includes("undelivered")) {
-                                    failedCount++;
-                                    leadHasFailedMsg = true;
-                                }
-                            }
-                        }
-                    }
-                    if (lead["W.P_FollowUp"]) sentCount++;
-                    for (let i = 1; i <= 10; i++) {
-                        if (lead[`W.P_FollowUp_${i}`] || lead[`W.P_FollowUp ${i}`]) {
-                            sentCount++;
-                            const ts = lead[`W.P_FollowUp_TS${i}`] || lead[`W.P_FollowUp ${i} TS`] || lead[`W.P_FollowUp_${i} TS`];
-                            if (ts && typeof ts === 'string') {
-                                const low = ts.toLowerCase();
-                                if (low.includes("failed") || low.includes("error") || low.includes("undelivered")) {
-                                    failedCount++;
-                                    leadHasFailedMsg = true;
-                                }
-                            }
-                        }
-                    }
-                    for (let i = 1; i <= 10; i++) {
-                        if (lead[`W.P_Replied_${i}`] || lead[`W.P_Replied ${i}`]) sentCount++;
-                    }
+                });
+                if (leadSent === 0 && lead.source_loop === "Activity" && lead.content) {
+                    leadSent++;
+                }
 
-                    if (!leadHasFailedMsg) {
-                        const lStatus = String(lead.status || lead.message_status || lead.delivery_status || '').toLowerCase();
-                        const lErr = lead.Error || lead.error || lead.error_message || lead.errorMessage;
-                        if (lStatus.includes("failed") || lStatus.includes("error") || (lErr && String(lErr).trim())) {
-                            failedCount++;
-                        }
-                    }
+                if (leadSent > 0) {
+                    leadsWithSentMsg++;
+                    sentCount += leadSent;
                 }
 
                 const isReplied = isTrueWpReply(lead);
                 if (isReplied) repliedCount++;
+
+                const lStatus = String(lead.status || lead.message_status || lead.delivery_status || '').toLowerCase();
+                const lErr = lead.Error || lead.error || lead.error_message || lead.errorMessage;
+                if (lStatus.includes("failed") || lStatus.includes("error") || (lErr && String(lErr).trim())) {
+                    failedCount++;
+                }
             });
+            uniqueSentCount = leadsWithSentMsg;
         } else {
             filteredOwners.forEach(o => {
                 if (o["Whatsapp_1"]) { sentCount++; uniqueSentCount++; }

@@ -3,8 +3,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
 export interface WhatsappMetrics {
     totalReachouts: number;
     totalReplies: number;
@@ -14,53 +12,45 @@ export interface WhatsappMetrics {
     ownerReplies: number;
 }
 
+function checkIsNonEmpty(val: any): boolean {
+    if (val === null || val === undefined) return false;
+    const str = String(val).trim();
+    return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+}
+
+function checkIsReplied(val: any): boolean {
+    if (val === null || val === undefined) return false;
+    if (Array.isArray(val)) return val.length > 0;
+    if (typeof val === 'object') return Object.keys(val).length > 0;
+    const str = String(val).trim().toLowerCase();
+    return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
+}
+
 export async function GET(request: NextRequest) {
     try {
-        const { searchParams } = new URL(request.url);
-        const from = searchParams.get('from');
-        const to = searchParams.get('to');
-
-        const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        const { data: customers } = await supabaseAdmin
+            .from('customers')
+            .select('*');
 
         let totalReachouts = 0;
         let totalReplies = 0;
-        let ownerReachouts = 0;
-        let ownerReplies = 0;
         const dailyMap: Record<string, { reachouts: number; replies: number }> = {};
 
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                const { data, error } = await supabaseAdmin
-                    .from(table)
-                    .select('created_at, status, vapi_account')
-                    .ilike('channel', 'WhatsApp')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate);
+        (customers || []).forEach(c => {
+            const hasReachout = checkIsNonEmpty(c.WA_text) || checkIsNonEmpty(c.whatsapp_1) || checkIsNonEmpty(c.whatsapp_2) || checkIsNonEmpty(c.whatsapp_3) || checkIsNonEmpty(c.whatsapp_4);
+            const isReplied = checkIsReplied(c.WA_replied);
 
-                if (!error && data) {
-                    for (const row of data) {
-                        totalReachouts++;
-                        const isReplied = row.status === 'completed' || row.status === 'replied';
-                        if (isReplied) totalReplies++;
+            if (hasReachout) totalReachouts++;
+            if (isReplied) totalReplies++;
 
-                        if (row.vapi_account === 'owners') {
-                            ownerReachouts++;
-                            if (isReplied) ownerReplies++;
-                        }
-
-                        if (row.created_at) {
-                            const dayKey = new Date(row.created_at).toISOString().slice(0, 10);
-                            if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
-                            dailyMap[dayKey].reachouts++;
-                            if (isReplied) dailyMap[dayKey].replies++;
-                        }
-                    }
-                }
-            } catch {
-                // skip tables that don't exist
+            const dt = c.last_contacted_at || c.created_at || c.eworks_created_on;
+            if (dt) {
+                const dayKey = new Date(dt).toISOString().slice(0, 10);
+                if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
+                if (hasReachout) dailyMap[dayKey].reachouts++;
+                if (isReplied) dailyMap[dayKey].replies++;
             }
-        }
+        });
 
         const dailyTrend = Object.entries(dailyMap)
             .sort(([a], [b]) => a.localeCompare(b))
@@ -73,8 +63,8 @@ export async function GET(request: NextRequest) {
             totalReplies,
             replyRate,
             dailyTrend,
-            ownerReachouts,
-            ownerReplies,
+            ownerReachouts: 0,
+            ownerReplies: 0,
         } satisfies WhatsappMetrics, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });

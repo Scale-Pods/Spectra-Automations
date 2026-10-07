@@ -3,114 +3,87 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
 export async function GET(request: NextRequest): Promise<NextResponse> {
     try {
         const { searchParams } = new URL(request.url);
-        const from = searchParams.get('from');
-        const to = searchParams.get('to');
         const channel = searchParams.get('channel');
         const reply = searchParams.get('reply');
         const search = searchParams.get('search');
-        const page = parseInt(searchParams.get('page') || '1');
-        const limit = parseInt(searchParams.get('limit') || '50');
+        const page = parseInt(searchParams.get('page') || '1', 10);
+        const limit = parseInt(searchParams.get('limit') || '50', 10);
 
-        const fromDate = from || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        // Query customers for lookup
+        const { data: customerRows } = await supabaseAdmin
+            .from('customers')
+            .select('*');
 
-        const allResults: any[] = [];
-        let totalCount = 0;
-        const errors: string[] = [];
+        const customers = customerRows || [];
+        const customerMap = new Map<string, any>();
+        customers.forEach(c => customerMap.set(c.id, c));
 
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                let countQuery = supabaseAdmin
-                    .from(table)
-                    .select('id', { count: 'exact', head: true });
+        // Query messages
+        let msgQuery = supabaseAdmin
+            .from('messages')
+            .select('*', { count: 'exact' });
 
-                let dataQuery = supabaseAdmin
-                    .from(table)
-                    .select('*')
-                    .order('created_at', { ascending: false })
-                    .limit(limit);
+        if (channel && channel !== 'all') {
+            msgQuery = msgQuery.ilike('channel', channel);
+        }
 
-                // Apply date filter if search is not present or if explicit dates provided
-                if (from || !search) {
-                    countQuery = countQuery.gte('created_at', fromDate).lte('created_at', toDate);
-                    dataQuery = dataQuery.gte('created_at', fromDate).lte('created_at', toDate);
-                }
-
-                if (channel && channel !== 'all') {
-                    countQuery = countQuery.ilike('channel', channel);
-                    dataQuery = dataQuery.ilike('channel', channel);
-                }
-
-                if (reply && reply !== 'all') {
-                    if (reply === 'yes') {
-                        const filterReply = 'replied.ilike.yes,replied.eq.true,status.ilike.%reply%,status.ilike.%replied%';
-                        countQuery = countQuery.or(filterReply);
-                        dataQuery = dataQuery.or(filterReply);
-                    } else if (reply === 'no') {
-                        const filterNoReply = 'replied.ilike.no,replied.is.null,replied.eq.false';
-                        countQuery = countQuery.or(filterNoReply);
-                        dataQuery = dataQuery.or(filterNoReply);
-                    }
-                }
-
-                if (search) {
-                    const cleanSearch = search.trim();
-                    const isNum = /^\d+$/.test(cleanSearch);
-                    let filter = `lead_name.ilike.%${cleanSearch}%,lead_phone.ilike.%${cleanSearch}%,lead_email.ilike.%${cleanSearch}%,action_type.ilike.%${cleanSearch}%,note.ilike.%${cleanSearch}%,content.ilike.%${cleanSearch}%,summary.ilike.%${cleanSearch}%,replied.ilike.%${cleanSearch}%`;
-                    if (isNum) {
-                        filter += `,lead_id.eq.${cleanSearch},id.eq.${cleanSearch}`;
-                    }
-                    countQuery = countQuery.or(filter);
-                    dataQuery = dataQuery.or(filter);
-                }
-
-                const [countResult, dataResult] = await Promise.all([
-                    countQuery,
-                    dataQuery,
-                ]);
-
-                if (countResult.error) {
-                    errors.push(`${table} count: ${countResult.error.message}`);
-                    continue;
-                }
-                if (dataResult.error) {
-                    errors.push(`${table} data: ${dataResult.error.message}`);
-                    continue;
-                }
-
-                if (dataResult.data && dataResult.data.length > 0) {
-                    const tagged = dataResult.data.map((row: any) => ({
-                        ...row,
-                        _source_table: table,
-                    }));
-                    allResults.push(...tagged);
-                }
-                totalCount += countResult.count || 0;
-            } catch (tableErr: any) {
-                errors.push(`${table}: ${tableErr.message}`);
+        if (reply && reply !== 'all') {
+            if (reply === 'yes') {
+                msgQuery = msgQuery.or('direction.eq.INBOUND,status.ilike.%reply%');
+            } else if (reply === 'no') {
+                msgQuery = msgQuery.eq('direction', 'OUTBOUND');
             }
         }
 
-        allResults.sort((a, b) => {
-            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return db - da;
-        });
+        if (search) {
+            const s = search.trim();
+            msgQuery = msgQuery.or(`subject.ilike.%${s}%,body_text.ilike.%${s}%,sender_address.ilike.%${s}%,recipient_address.ilike.%${s}%`);
+        }
 
         const offset = (page - 1) * limit;
-        const paginated = allResults.slice(offset, offset + limit);
+        msgQuery = msgQuery.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+
+        const { data: messages, count: totalCount, error: msgErr } = await msgQuery;
+
+        if (msgErr) {
+            console.error('Error fetching messages in activity API:', msgErr);
+        }
+
+        const rawMessages = messages || [];
+
+        const activities = rawMessages.map((m: any) => {
+            const cust = customerMap.get(m.customer_id) || {};
+            const custName = cust.full_name || cust.customer_name || 'Customer';
+            const isReply = m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
+
+            return {
+                id: m.id,
+                lead_id: m.customer_id,
+                lead_name: custName,
+                lead_phone: cust.phone_e164 || m.sender_address || m.recipient_address || '',
+                lead_email: cust.email || m.sender_address || m.recipient_address || '',
+                channel: m.channel || 'WhatsApp',
+                action_type: m.channel || 'WhatsApp',
+                direction: m.direction || 'OUTBOUND',
+                status: m.status || (isReply ? 'replied' : 'sent'),
+                replied: isReply ? 'yes' : 'no',
+                WP_Replied_track: isReply ? 'Replied' : '',
+                content: m.body_text || m.subject || '',
+                note: m.body_text || m.subject || '',
+                summary: m.subject || m.body_text || '',
+                created_at: m.sent_or_received_at || m.created_at || new Date().toISOString(),
+                _source_table: 'messages'
+            };
+        });
 
         return NextResponse.json({
-            activities: paginated,
-            total: totalCount,
+            activities,
+            total: totalCount || activities.length,
             page,
             limit,
-            errors: errors.length > 0 ? errors : undefined,
         }, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });
@@ -125,3 +98,4 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         }, { status: 500 });
     }
 }
+

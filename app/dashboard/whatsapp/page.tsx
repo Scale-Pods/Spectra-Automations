@@ -23,11 +23,11 @@ import {
     Line
 } from "recharts";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { subDays } from "date-fns";
+import { subDays, startOfDay, endOfDay, format } from "date-fns";
 import { LMLoader } from "@/components/spectra-loader";
-import { SPECTRA_WHATSAPP_METRICS } from "@/lib/dummy-data";
+import { useData } from "@/context/DataContext";
 
 export default function WhatsappDashboardPage() {
     const router = useRouter();
@@ -36,19 +36,83 @@ export default function WhatsappDashboardPage() {
         from: subDays(new Date(), 90),
         to: new Date()
     });
-    const loading = false;
+    const [loading, setLoading] = useState(true);
+    const [waData, setWaData] = useState<any>({
+        uniqueSentCount: 0,
+        sentCount: 0,
+        totalReplies: 0,
+        activityReachouts: 0,
+        activityReplies: 0,
+        trendData: [] as any[],
+    });
+
+    const fetchData = useCallback(async (from: Date, to: Date) => {
+        setLoading(true);
+        const fromISO = startOfDay(from).toISOString();
+        const toISO = endOfDay(to).toISOString();
+        try {
+            const metricsRes = await fetch(`/api/metrics/whatsapp?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
+
+            let uniqueSentCount = 0;
+            let sentCount = 0;
+            let totalReplies = 0;
+            let activityReachouts = 0;
+            let activityReplies = 0;
+            let dailyMap: Record<string, { sent: number; replied: number }> = {};
+
+            if (metricsRes.ok) {
+                const m = await metricsRes.json();
+                activityReachouts = m.totalReachouts || 0;
+                activityReplies = m.totalReplies || 0;
+                uniqueSentCount = m.totalReachouts || 0;
+                sentCount = m.totalReachouts || 0;
+                totalReplies = m.totalReplies || 0;
+                if (m.dailyTrend && m.dailyTrend.length > 0) {
+                    m.dailyTrend.forEach((d: any) => {
+                        const dateKey = d.date;
+                        dailyMap[dateKey] = { sent: d.reachouts || 0, replied: d.replies || 0 };
+                    });
+                }
+            }
+
+            const trendData = Object.entries(dailyMap)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([date, vals]) => ({
+                    date: format(new Date(date + 'T00:00:00'), 'MMM dd'),
+                    sent: vals.sent,
+                    replied: vals.replied,
+                }));
+
+            setWaData({
+                uniqueSentCount,
+                sentCount,
+                totalReplies,
+                activityReachouts,
+                activityReplies,
+                trendData,
+            });
+        } catch (err) {
+            console.error('Error fetching whatsapp page metrics:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (dateRange?.from) {
+            fetchData(dateRange.from, dateRange.to || dateRange.from);
+        }
+    }, [dateRange, fetchData]);
 
     const stats = {
-        totalLeads: 1480,
-        sentCount: SPECTRA_WHATSAPP_METRICS.sentCount,
-        uniqueSentCount: SPECTRA_WHATSAPP_METRICS.uniqueSentCount,
-        totalReplies: SPECTRA_WHATSAPP_METRICS.totalReplies,
-        activityReachouts: 5320,
-        activityReplies: 740,
-        dailyTrend: SPECTRA_WHATSAPP_METRICS.trendData
+        totalLeads: waData.uniqueSentCount,
+        sentCount: waData.sentCount,
+        uniqueSentCount: waData.uniqueSentCount,
+        totalReplies: waData.totalReplies,
+        activityReachouts: waData.activityReachouts,
+        activityReplies: waData.activityReplies,
+        dailyTrend: waData.trendData
     };
-
-    const trendData = SPECTRA_WHATSAPP_METRICS.trendData;
 
     const donutData = [
         { name: 'Unique Msg Sent', value: stats.uniqueSentCount, color: '#8b5cf6' },
@@ -73,32 +137,32 @@ export default function WhatsappDashboardPage() {
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                 <MetricCard
                     title="Unique Msg Sent"
-                    value={stats.uniqueSentCount.toLocaleString()}
+                    value={loading ? "..." : stats.uniqueSentCount.toLocaleString()}
                     icon={Users}
                     theme="purple"
                     onClick={() => router.push('/dashboard/whatsapp/leads')}
                 />
                 <MetricCard
                     title="Total Replies"
-                    value={stats.totalReplies.toLocaleString()}
+                    value={loading ? "..." : stats.totalReplies.toLocaleString()}
                     icon={MessageCircle}
                     theme="emerald"
                 />
                 <MetricCard
                     title="Messages Sent"
-                    value={stats.sentCount.toLocaleString()}
+                    value={loading ? "..." : stats.sentCount.toLocaleString()}
                     icon={Send}
                     theme="blue"
                 />
                 <MetricCard
                     title="Activity Reachouts"
-                    value={stats.activityReachouts.toLocaleString()}
+                    value={loading ? "..." : stats.activityReachouts.toLocaleString()}
                     icon={Activity}
                     theme="amber"
                 />
                 <MetricCard
                     title="Activity Replies"
-                    value={stats.activityReplies.toLocaleString()}
+                    value={loading ? "..." : stats.activityReplies.toLocaleString()}
                     icon={MessageCircle}
                     theme="amber"
                 />
@@ -135,9 +199,9 @@ export default function WhatsappDashboardPage() {
                             </ResponsiveContainer>
                         </div>
                         <div className="grid grid-cols-3 gap-4 mt-4">
-                            <SummaryPill label="Unique Msg Sent" value={stats.uniqueSentCount} color="bg-purple-600" />
-                            <SummaryPill label="Messages Sent" value={stats.sentCount} color="bg-blue-600" />
-                            <SummaryPill label="Total Replies" value={stats.totalReplies} color="bg-emerald-600" />
+                            <SummaryPill label="Unique Msg Sent" value={loading ? "..." : stats.uniqueSentCount} color="bg-purple-600" />
+                            <SummaryPill label="Messages Sent" value={loading ? "..." : stats.sentCount} color="bg-blue-600" />
+                            <SummaryPill label="Total Replies" value={loading ? "..." : stats.totalReplies} color="bg-emerald-600" />
                         </div>
                     </CardContent>
                 </Card>
@@ -152,7 +216,7 @@ export default function WhatsappDashboardPage() {
                     <CardContent className="pt-2">
                         <div className="w-full" style={{ height: 200, minHeight: 200 }}>
                             <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={trendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                                <LineChart data={stats.dailyTrend} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} dy={10} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
@@ -216,3 +280,4 @@ function SummaryPill({ label, value, color }: any) {
         </div>
     );
 }
+

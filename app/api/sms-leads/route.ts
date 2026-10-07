@@ -3,72 +3,67 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const from = searchParams.get('from');
-        const to = searchParams.get('to');
         const search = searchParams.get('search');
 
-        const fromDate = from || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        // Fetch customers with phone numbers
+        const { data: customerRows } = await supabaseAdmin
+            .from('customers')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-        // Fetch SMS activity records across all 4 activity tables
-        const smsActivity: any[] = [];
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                let query = supabaseAdmin
-                    .from(table)
-                    .select('*')
-                    .ilike('channel', 'sms')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate)
-                    .order('created_at', { ascending: false })
-                    .limit(500);
+        const customers = customerRows || [];
 
-                if (search) {
-                    query = query.or(`lead_name.ilike.%${search}%,lead_phone.ilike.%${search}%,lead_email.ilike.%${search}%,content.ilike.%${search}%`);
-                }
-
-                const { data, error } = await query;
-
-                if (!error && data && data.length > 0) {
-                    smsActivity.push(...data.map((row: any) => ({
-                        ...row,
-                        _source_table: table,
-                    })));
-                }
-            } catch {
-                // skip tables that don't exist
-            }
-        }
-
-        smsActivity.sort((a, b) => {
-            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return db - da;
+        const smsLeads = customers.map((c: any) => {
+            const name = c.full_name || c.customer_name || 'Customer';
+            const phone = c.phone_e164 || c.mobile_raw || c.telephone_raw || '';
+            return {
+                id: c.id,
+                Name: name,
+                name: name,
+                Phone: phone,
+                phone: phone,
+                email: c.email || '',
+                city: c.city || 'Dubai',
+                created_at: c.created_at || c.eworks_created_on,
+                _source_table: 'customers'
+            };
         });
 
-        // Also attempt to fetch lead records with SMS touchpoints
-        let smsLeads: any[] = [];
-        try {
-            const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_wa_leads_list', {
-                p_from: fromDate,
-                p_to: toDate,
-            });
-            if (!rpcError && rpcData) {
-                const combined = [
-                    ...(rpcData.nr_wf || []),
-                    ...(rpcData.followup || []),
-                    ...(rpcData.nurture || [])
-                ];
-                smsLeads = combined.filter((l: any) => l.Phone || l.phone);
-            }
-        } catch {
-            // fallback
+        // Query SMS messages from messages table
+        let msgQuery = supabaseAdmin
+            .from('messages')
+            .select('*')
+            .ilike('channel', 'sms')
+            .order('created_at', { ascending: false });
+
+        if (search) {
+            msgQuery = msgQuery.or(`body_text.ilike.%${search}%,sender_address.ilike.%${search}%,recipient_address.ilike.%${search}%`);
         }
+
+        const { data: smsMessages } = await msgQuery;
+
+        const customerMap = new Map<string, any>();
+        customers.forEach(c => customerMap.set(c.id, c));
+
+        const smsActivity = (smsMessages || []).map((m: any) => {
+            const cust = customerMap.get(m.customer_id) || {};
+            const custName = cust.full_name || cust.customer_name || 'Customer';
+
+            return {
+                id: m.id,
+                lead_name: custName,
+                lead_phone: cust.phone_e164 || m.sender_address || m.recipient_address || '',
+                lead_email: cust.email || '',
+                content: m.body_text || m.subject || '',
+                direction: m.direction || 'OUTBOUND',
+                status: m.status || 'sent',
+                created_at: m.sent_or_received_at || m.created_at,
+                _source_table: 'messages'
+            };
+        });
 
         return NextResponse.json({
             sms_activity: smsActivity,
@@ -86,3 +81,4 @@ export async function GET(request: NextRequest) {
         }, { status: 500 });
     }
 }
+

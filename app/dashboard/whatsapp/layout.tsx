@@ -68,16 +68,16 @@ export default function WhatsappLayout({
     }
 
     return (
-        <div className="flex h-screen overflow-hidden bg-[#0a0d14] text-[var(--label-primary)] relative">
+        <div className="flex h-screen overflow-hidden bg-[#F8FAFC] text-[var(--label-primary)] relative">
             {/* Ambient Light Orbs */}
-            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-indigo-600/20 blur-[120px] pointer-events-none z-0" />
-            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-blue-600/15 blur-[120px] pointer-events-none z-0" />
+            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-purple-600/10 blur-[120px] pointer-events-none z-0" />
+            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-violet-600/10 blur-[120px] pointer-events-none z-0" />
 
             {/* WhatsApp Sidebar */}
-            <aside className="w-64 flex-col bg-[rgba(18,24,41,0.55)] backdrop-blur-[25px] saturate-[180%] border-r border-[rgba(255,255,255,0.1)] hidden md:flex font-sans z-10">
+            <aside className="w-64 flex-col bg-slate-100/95 backdrop-blur-xl border-r border-slate-200/90 hidden md:flex font-sans z-10 shadow-sm">
                 {/* Logo Section */}
                 <div className="px-5 pt-5 pb-3 flex justify-center">
-                    <div className="relative w-full h-14 block rounded-xl bg-white p-2 shadow-lg shadow-black/30">
+                    <div className="relative w-full h-14 block rounded-xl bg-white p-2 border border-slate-200 shadow-sm">
                         <Image
                             src="/spectra-wide-logo.png"
                             alt="Spectra Automation Logo"
@@ -93,29 +93,29 @@ export default function WhatsappLayout({
                         <DropdownMenuTrigger asChild>
                             <Button
                                 variant="outline"
-                                className="w-full justify-between bg-[rgba(255,255,255,0.05)] backdrop-blur-[20px] border border-[rgba(255,255,255,0.15)] text-[var(--label-primary)] hover:bg-[rgba(255,255,255,0.1)] h-10 shadow-sm rounded-xl"
+                                className="w-full justify-between bg-white border border-slate-200/80 text-slate-900 hover:bg-slate-50 h-10 shadow-sm rounded-xl font-medium"
                             >
                                 <span className="flex items-center gap-2">
-                                    <LayoutDashboard className="h-4 w-4 text-green-400" />
+                                    <LayoutDashboard className="h-4 w-4 text-emerald-600" />
                                     <span>Switch Dashboard</span>
                                 </span>
-                                <ChevronDown className="h-4 w-4 opacity-50" />
+                                <ChevronDown className="h-4 w-4 text-slate-400" />
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-[220px]" side="top">
                             <DropdownMenuItem asChild>
                                 <Link href="/dashboard" className="cursor-pointer w-full flex items-center">
-                                    <LayoutDashboard className="mr-2 h-4 w-4" /> Master Overview
+                                    <LayoutDashboard className="mr-2 h-4 w-4 text-violet-600" /> Master Overview
                                 </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                                 <Link href="/dashboard/email" className="cursor-pointer w-full flex items-center">
-                                    <Mail className="mr-2 h-4 w-4" /> Email Marketing
+                                    <Mail className="mr-2 h-4 w-4 text-violet-600" /> Email Marketing
                                 </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                                 <Link href="/dashboard/whatsapp" className="cursor-pointer w-full flex items-center">
-                                    <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp CRM
+                                    <MessageCircle className="mr-2 h-4 w-4 text-emerald-600" /> WhatsApp CRM
                                 </Link>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -123,7 +123,7 @@ export default function WhatsappLayout({
                 </div>
 
                 <div className="px-4 py-2">
-                    <div className="h-[1px] w-full bg-[rgba(255,255,255,0.1)]"></div>
+                    <div className="h-[1px] w-full bg-slate-200/80"></div>
                 </div>
 
                 <nav className="flex-1 overflow-auto px-4 space-y-2">
@@ -135,10 +135,10 @@ export default function WhatsappLayout({
                                 href={item.href}
                                 className={`group flex items-center gap-4 rounded-full px-4 py-3 text-sm font-medium transition-all duration-300 ${isActive
                                     ? "active-liquid-pill"
-                                    : "text-slate-300 hover:text-white nav-item-glass"
+                                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                                     }`}
                             >
-                                <item.icon className={`h-5 w-5 ${isActive ? "text-blue-300" : "text-slate-400 group-hover:text-slate-200 transition-colors"}`} />
+                                <item.icon className={`h-5 w-5 ${isActive ? "text-white" : "text-slate-500 group-hover:text-slate-800 transition-colors"}`} />
                                 {item.title}
                             </Link>
                         );
@@ -150,7 +150,7 @@ export default function WhatsappLayout({
             </aside>
 
             {/* Main Content Area */}
-            <main className="flex-1 overflow-auto bg-[#0a0d14] p-6 relative z-10">
+            <main className="flex-1 overflow-auto bg-[#F8FAFC] p-6 relative z-10">
                 {children}
             </main>
         </div>

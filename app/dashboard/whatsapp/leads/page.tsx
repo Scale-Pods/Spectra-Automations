@@ -106,11 +106,9 @@ function getTemperatureBadge(tempRaw?: string) {
     return <Badge variant="outline" className="text-[10px] text-[var(--label-secondary)] border-[var(--separator)] uppercase font-bold">{tempRaw}</Badge>;
 }
 
-import { SPECTRA_DUMMY_LEADS } from "@/lib/dummy-data";
-
 export default function WhatsappLeadsPage() {
-    const [waLeads, setWaLeads] = useState<WALead[]>(SPECTRA_DUMMY_LEADS as any);
-    const loading = false;
+    const [waLeads, setWaLeads] = useState<WALead[]>([]);
+    const [loading, setLoading] = useState(true);
     const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedLeadIdForChat, setSelectedLeadIdForChat] = useState<string | null>(null);
@@ -122,6 +120,54 @@ export default function WhatsappLeadsPage() {
         from: subDays(new Date(), 90),
         to: new Date(),
     });
+
+    const fetchWaLeads = useCallback(async (from: Date, to: Date) => {
+        setLoading(true);
+        const fromISO = startOfDay(from).toISOString();
+        const toISO = endOfDay(to).toISOString();
+        try {
+            const res = await fetch(`/api/whatsapp-leads?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
+            if (res.ok) {
+                const data = await res.json();
+                const nr_wf = (data.nr_wf || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Intro" }));
+                const followup = (data.followup || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Follow Up" }));
+                const nurture = (data.nurture || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Nurture" }));
+                const owners = (data.owners || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Owners" }));
+                const waActivity = (data.wa_activity || []).map((a: any) => ({
+                    ...a,
+                    source_loop: "Activity",
+                    "Name": a.lead_name || a.name || "Lead",
+                    "Phone": a.lead_phone || a.phone || "",
+                    "W.P_1": a.created_at || true,
+                    wp1_parsed_date: a.created_at,
+                    "WP_Replied_track": (a.replied_at || a.status === "completed" || a.status === "replied" || a.replied) ? "Replied" : "",
+                    status: a.status || "sent"
+                }));
+                const mergedRaw = [...nr_wf, ...followup, ...nurture, ...owners, ...waActivity];
+                const seen = new Set<string>();
+                const merged: any[] = [];
+                mergedRaw.forEach((l: any) => {
+                    const phoneClean = String(l.phone_e164 || l.phone || l.Phone || '').replace(/\D/g, '');
+                    const key = phoneClean.length >= 7 ? phoneClean : String(l.id || l["Lead ID"] || Math.random());
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        merged.push(l);
+                    }
+                });
+                setWaLeads(merged);
+            }
+        } catch (err) {
+            console.error('Error fetching whatsapp leads:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (dateRange?.from) {
+            fetchWaLeads(dateRange.from, dateRange.to || dateRange.from);
+        }
+    }, [dateRange, fetchWaLeads]);
 
     const [activeFilters, setActiveFilters] = useState<{
         replyStatus: string[];

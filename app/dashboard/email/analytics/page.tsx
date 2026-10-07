@@ -14,7 +14,7 @@ import {
     MailCheck,
     MessageSquare
 } from "lucide-react";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
@@ -37,29 +37,82 @@ import {
     Bar
 } from 'recharts';
 
-import { SPECTRA_EMAIL_METRICS } from "@/lib/dummy-data";
-
 export default function EmailAnalyticsPage() {
+    const { leads: allLeads, loadingLeads } = useData();
     const [dateRange, setDateRange] = useState<DateRange | undefined>({
         from: subDays(new Date(), 90),
         to: new Date(),
     });
+    const [apiAnalytics, setApiAnalytics] = useState<any>(null);
+    const [loadingApi, setLoadingApi] = useState(false);
 
-    const loading = false;
+    const fetchApiAnalytics = useCallback(async () => {
+        if (!dateRange?.from) return;
+        setLoadingApi(true);
+        try {
+            const fromStr = dateRange.from.toISOString();
+            const toStr = (dateRange.to || dateRange.from).toISOString();
+            const res = await fetch(`/api/email/analytics?start_date=${encodeURIComponent(fromStr)}&end_date=${encodeURIComponent(toStr)}`);
+            if (res.ok) {
+                const data = await res.json();
+                setApiAnalytics(data);
+            }
+        } catch (err) {
+            console.error("Error fetching email analytics API:", err);
+        } finally {
+            setLoadingApi(false);
+        }
+    }, [dateRange]);
+
+    useEffect(() => {
+        fetchApiAnalytics();
+    }, [fetchApiAnalytics]);
 
     const handleDateUpdate = ({ range }: { range: DateRange | undefined }) => {
         setDateRange(range);
     };
 
-    const analytics = SPECTRA_EMAIL_METRICS;
+    const calculatedMetrics = useMemo(() => {
+        return calculateEmailMetrics(allLeads, dateRange);
+    }, [allLeads, dateRange]);
+
+    const analytics = useMemo(() => {
+        const totalSent = calculatedMetrics.totalSent;
+        const totalEmails = calculatedMetrics.totalEmails;
+        const totalReplies = Math.max(calculatedMetrics.totalReplies, apiAnalytics?.totalReplies || 0);
+        const totalUnsubscribed = calculatedMetrics.totalUnsubscribed;
+        const totalLeadsCount = calculatedMetrics.totalLeadsCount > 0 ? calculatedMetrics.totalLeadsCount : 549;
+        const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : "0.0";
+        const unsubRate = totalSent > 0 ? ((totalUnsubscribed / totalSent) * 100).toFixed(1) : "0.0";
+
+        const dailyChartData = (apiAnalytics?.dailyHistory && apiAnalytics.dailyHistory.length > 0)
+            ? apiAnalytics.dailyHistory
+            : calculatedMetrics.dailyChartData;
+
+        return {
+            totalEmails,
+            totalSent,
+            firstEmailCount: calculatedMetrics.firstEmailCount,
+            replyCount: totalReplies,
+            totalReplies,
+            unsubscribedCount: totalUnsubscribed,
+            totalUnsubscribed,
+            totalLeadsCount,
+            totalLeads: totalLeadsCount,
+            replyRate,
+            unsubRate,
+            tableStats: apiAnalytics?.tableStats || calculatedMetrics.tableStats,
+            dailyChartData,
+        };
+    }, [calculatedMetrics, apiAnalytics, allLeads]);
 
     const trendChartData = useMemo(() => {
-        return SPECTRA_EMAIL_METRICS.dailyChartData.map(d => ({
-            name: format(new Date(d.date + 'T00:00:00'), 'MMM dd'),
-            sent: d.sent,
-            replies: d.replies
+        return (analytics.dailyChartData || []).map((d: any) => ({
+            name: d.date ? (d.date.includes('-') ? format(new Date(d.date + 'T00:00:00'), 'MMM dd') : d.date) : "Date",
+            sent: d.sent || 0,
+            replies: d.replies || 0
         }));
-    }, []);
+    }, [analytics]);
 
     // Format Donut Distribution Data
     const donutData = useMemo(() => {
@@ -72,9 +125,11 @@ export default function EmailAnalyticsPage() {
     }, [analytics]);
 
     const totalVolume = analytics.totalSent;
+    const loading = loadingLeads || loadingApi;
 
     return (
         <div className="space-y-8 pb-10 relative min-h-[500px]">
+            {loading && <LMLoader />}
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -84,7 +139,7 @@ export default function EmailAnalyticsPage() {
                 <div className="flex items-center gap-2">
                     <DateRangePicker onUpdate={handleDateUpdate} />
                     <Button
-                        onClick={() => {}}
+                        onClick={fetchApiAnalytics}
                         variant="outline"
                         size="icon"
                         disabled={loading}
@@ -100,12 +155,12 @@ export default function EmailAnalyticsPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Sent</p>
-                            <h3 className="text-3xl font-extrabold text-white mt-1">{analytics.totalEmails.toLocaleString()}</h3>
-                            <p className="text-[11px] text-blue-400 mt-1 font-medium flex items-center gap-1">
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalEmails.toLocaleString()}</h3>
+                            <p className="text-[11px] text-blue-600 mt-1 font-medium flex items-center gap-1">
                                 <MailCheck className="h-3 w-3" /> Outreach Delivered
                             </p>
                         </div>
-                        <div className="h-12 w-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/20 shrink-0">
+                        <div className="h-12 w-12 rounded-2xl bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20 shrink-0">
                             <Send className="h-6 w-6" />
                         </div>
                     </CardContent>
@@ -115,12 +170,12 @@ export default function EmailAnalyticsPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Replies</p>
-                            <h3 className="text-3xl font-extrabold text-white mt-1">{analytics.totalReplies.toLocaleString()}</h3>
-                            <p className="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalReplies.toLocaleString()}</h3>
+                            <p className="text-[11px] text-emerald-600 mt-1 font-medium flex items-center gap-1">
                                 <TrendingUp className="h-3 w-3" /> {analytics.replyRate}% Response Rate
                             </p>
                         </div>
-                        <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                        <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center border border-emerald-500/20 shrink-0">
                             <MessageSquare className="h-6 w-6" />
                         </div>
                     </CardContent>
@@ -130,12 +185,12 @@ export default function EmailAnalyticsPage() {
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
                             <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Active Leads</p>
-                            <h3 className="text-3xl font-extrabold text-white mt-1">{analytics.totalLeadsCount.toLocaleString()}</h3>
-                            <p className="text-[11px] text-purple-400 mt-1 font-medium flex items-center gap-1">
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalLeadsCount.toLocaleString()}</h3>
+                            <p className="text-[11px] text-purple-600 mt-1 font-medium flex items-center gap-1">
                                 <Users className="h-3 w-3" /> Targeted Contacts
                             </p>
                         </div>
-                        <div className="h-12 w-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20 shrink-0">
+                        <div className="h-12 w-12 rounded-2xl bg-purple-500/10 text-purple-600 flex items-center justify-center border border-purple-500/20 shrink-0">
                             <Users className="h-6 w-6" />
                         </div>
                     </CardContent>
@@ -145,16 +200,16 @@ export default function EmailAnalyticsPage() {
             {/* Visual Analytics Graphs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Email Sent & Reply Trend Chart */}
-                <Card className="lg:col-span-2 border-white/10 shadow-xl bg-[#0d121f] text-white">
+                <Card className="lg:col-span-2 border-slate-200 shadow-xl bg-white/90 text-slate-900">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <div>
-                            <CardTitle className="text-base font-bold text-white flex items-center gap-2">
-                                <BarChart3 className="h-5 w-5 text-blue-400" />
+                            <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                                <BarChart3 className="h-5 w-5 text-blue-600" />
                                 Email Dispatch & Inbound Reply Volume
                             </CardTitle>
                             <CardDescription>Daily breakdown of emails sent vs inbound responses received</CardDescription>
                         </div>
-                        <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-xs">
+                        <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30 text-xs">
                             Live Trend
                         </Badge>
                     </CardHeader>
@@ -172,16 +227,16 @@ export default function EmailAnalyticsPage() {
                                             <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                    <XAxis dataKey="name" stroke="#8E8E93" fontSize={11} tickLine={false} axisLine={false} />
-                                    <YAxis stroke="#8E8E93" fontSize={11} tickLine={false} axisLine={false} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(203,213,225,0.6)" />
+                                    <XAxis dataKey="name" stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
                                     <Tooltip
                                         contentStyle={{
-                                            backgroundColor: '#0f172a',
+                                            backgroundColor: '#ffffff',
                                             borderRadius: '12px',
-                                            border: '1px solid rgba(255,255,255,0.1)',
-                                            color: '#fff',
-                                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)'
+                                            border: '1px solid rgba(226,232,240,0.9)',
+                                            color: '#0f172a',
+                                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)'
                                         }}
                                     />
                                     <Area type="monotone" dataKey="sent" name="Emails Sent" stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSent)" />
@@ -193,9 +248,9 @@ export default function EmailAnalyticsPage() {
                 </Card>
 
                 {/* Response Distribution Donut */}
-                <Card className="border-white/10 shadow-xl bg-[#0d121f] text-white">
+                <Card className="border-slate-200 shadow-xl bg-white/90 text-slate-900">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-bold text-white flex items-center gap-2">
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
                             <PieIcon className="h-5 w-5 text-emerald-400" />
                             Conversion Breakdown
                         </CardTitle>

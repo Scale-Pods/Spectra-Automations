@@ -13,7 +13,7 @@ interface AuthModalProps {
 export function AuthModal({ isOpen, onClose, defaultMode = 'login' }: AuthModalProps) {
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-md p-0 overflow-hidden bg-zinc-950 border-white/10 shadow-2xl rounded-3xl">
+            <DialogContent className="max-w-md p-0 overflow-hidden bg-white border-slate-200 shadow-2xl rounded-3xl text-slate-900">
                 <DialogHeader className="sr-only">
                     <DialogTitle>Authentication</DialogTitle>
                     <DialogDescription>
@@ -22,10 +22,10 @@ export function AuthModal({ isOpen, onClose, defaultMode = 'login' }: AuthModalP
                 </DialogHeader>
                 <div className="relative p-8 pt-12">
                     {/* Background effects */}
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 bg-emerald-500/20 blur-[80px] -z-10 rounded-full"></div>
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 bg-violet-500/10 blur-[80px] -z-10 rounded-full"></div>
 
                     <div className="flex justify-center mb-8">
-                        <div className="relative w-56 h-16 rounded-xl bg-white p-2 shadow-lg">
+                        <div className="relative w-56 h-16 rounded-xl bg-slate-50 border border-slate-200 p-2 shadow-sm">
                             <Image
                                 src="/spectra-wide-logo.png"
                                 alt="Spectra Automation Logo"

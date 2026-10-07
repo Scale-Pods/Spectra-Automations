@@ -202,26 +202,26 @@ export function TwilioDialer() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     {/* Backdrop */}
                     <div
-                        className="absolute inset-0 bg-black/65 backdrop-blur-md"
+                        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
                         onClick={handleClose}
                     />
 
                     {/* Dialer panel */}
-                    <div className="relative w-full max-w-[22rem] bg-zinc-950 border border-white/10 rounded-3xl shadow-[0_25px_60px_-10px_rgba(0,0,0,0.8)] overflow-hidden">
+                    <div className="relative w-full max-w-[22rem] bg-white border border-slate-200 rounded-3xl shadow-2xl overflow-hidden text-slate-900">
                         {/* Top accent line */}
-                        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+                        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-violet-500/40 to-transparent" />
 
                         <div className="p-6">
                             {/* Header */}
                             <div className="flex items-center justify-between mb-5">
                                 <div className="flex items-center gap-2.5">
                                     <div className={`h-2 w-2 rounded-full transition-colors duration-300 ${DOT_COLOR[status]}`} />
-                                    <span className="text-white font-semibold text-sm tracking-wide">Voice Dialer</span>
+                                    <span className="text-slate-900 font-semibold text-sm tracking-wide">Voice Dialer</span>
                                 </div>
                                 <button
                                     onClick={handleClose}
                                     disabled={isInCall}
-                                    className="text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                    className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                                 >
                                     <X className="h-4 w-4" />
                                 </button>
@@ -245,20 +245,20 @@ export function TwilioDialer() {
                             </div>
 
                             {/* Number display */}
-                            <div className="flex items-center gap-2 bg-zinc-900 border border-white/5 rounded-2xl px-4 py-3 mb-5 focus-within:border-emerald-500/30 transition-colors">
+                            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 mb-5 focus-within:border-violet-500/50 transition-colors">
                                 <input
                                     type="tel"
                                     value={phoneNumber}
                                     onChange={e => !isInCall && setPhoneNumber(e.target.value)}
                                     placeholder="+1 234 567 8900"
                                     readOnly={isInCall}
-                                    className="flex-1 bg-transparent text-white text-xl font-mono tracking-wider outline-none placeholder:text-zinc-700 min-w-0"
+                                    className="flex-1 bg-transparent text-slate-900 text-xl font-mono tracking-wider outline-none placeholder:text-slate-400 min-w-0"
                                     autoFocus
                                 />
                                 {phoneNumber && !isInCall && (
                                     <button
                                         onClick={() => setPhoneNumber(p => p.slice(0, -1))}
-                                        className="text-zinc-600 hover:text-zinc-300 transition-colors flex-shrink-0 active:scale-90"
+                                        className="text-slate-400 hover:text-slate-700 transition-colors flex-shrink-0 active:scale-90"
                                     >
                                         <Delete className="h-4 w-4" />
                                     </button>
@@ -271,11 +271,11 @@ export function TwilioDialer() {
                                     <button
                                         key={key}
                                         onClick={() => pressKey(key)}
-                                        className="h-14 rounded-xl bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-700 active:scale-95 border border-white/5 hover:border-white/10 transition-all duration-100 flex flex-col items-center justify-center gap-0.5"
+                                        className="h-14 rounded-xl bg-slate-100 hover:bg-slate-200/80 active:bg-slate-300 active:scale-95 border border-slate-200/80 transition-all duration-100 flex flex-col items-center justify-center gap-0.5"
                                     >
-                                        <span className="text-white font-semibold text-base leading-none">{key}</span>
+                                        <span className="text-slate-900 font-semibold text-base leading-none">{key}</span>
                                         {sub && (
-                                            <span className="text-zinc-600 text-[9px] font-medium leading-none tracking-widest">{sub}</span>
+                                            <span className="text-slate-500 text-[9px] font-medium leading-none tracking-widest">{sub}</span>
                                         )}
                                     </button>
                                 ))}
@@ -289,8 +289,8 @@ export function TwilioDialer() {
                                         onClick={toggleMute}
                                         className={`h-12 w-12 rounded-full flex items-center justify-center transition-all active:scale-90 border ${
                                             isMuted
-                                                ? 'bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25'
-                                                : 'bg-zinc-900 text-zinc-400 border-white/5 hover:text-white hover:border-white/10'
+                                                ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                                                : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-slate-900 hover:bg-slate-200'
                                         }`}
                                         aria-label={isMuted ? 'Unmute' : 'Mute'}
                                     >
@@ -320,7 +320,7 @@ export function TwilioDialer() {
                             </div>
 
                             {/* Hint */}
-                            <p className="text-center text-zinc-700 text-[10px] mt-4">
+                            <p className="text-center text-slate-500 text-[10px] mt-4">
                                 Enter number with country code · e.g. +971 50 123 4567
                             </p>
                         </div>

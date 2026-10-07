@@ -266,16 +266,16 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
     const leadEmail = lead?.["Email"] || lead?.email || "";
 
     return (
-        <div className="flex flex-col h-full bg-[#0d121f] text-white rounded-xl overflow-hidden border border-white/10 shadow-2xl">
+        <div className="flex flex-col h-full bg-white text-slate-900 rounded-xl overflow-hidden border border-slate-200 shadow-xl">
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/[0.03]">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/50">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
+                    <div className="w-10 h-10 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center font-bold">
                         <Mail className="h-5 w-5" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-lg text-white">{leadName}</h3>
-                        <p className="text-xs text-slate-400 font-mono">{leadEmail}</p>
+                        <h3 className="font-semibold text-lg text-slate-900">{leadName}</h3>
+                        <p className="text-xs text-slate-500 font-mono">{leadEmail}</p>
                     </div>
                 </div>
 

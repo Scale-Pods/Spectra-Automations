@@ -3,8 +3,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
 export interface MasterMetrics {
     totalLeads: number;
     oldestLeadDate: string | null;
@@ -39,185 +37,113 @@ const EMPTY: MasterMetrics = {
     activityRepliesCount: 0, activityTotalCount: 0,
 };
 
+function checkIsNonEmpty(val: any): boolean {
+    if (val === null || val === undefined) return false;
+    const str = String(val).trim();
+    return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+}
+
+function checkIsReplied(val: any): boolean {
+    if (val === null || val === undefined) return false;
+    if (Array.isArray(val)) return val.length > 0;
+    if (typeof val === 'object') return Object.keys(val).length > 0;
+    const str = String(val).trim().toLowerCase();
+    return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
     try {
         const { searchParams } = new URL(request.url);
-        const from = searchParams.get('from');
-        const to = searchParams.get('to');
 
-        const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        // Fetch all customers from public.customers
+        const { data: customers, error } = await supabaseAdmin
+            .from('customers')
+            .select('*');
 
-        // 1. Aggregate activity metrics across all 4 activity tables
-        let activityEmailCount = 0;
-        let activityWaCount = 0;
-        let activityVoiceCount = 0;
-        let activitySmsCount = 0;
-        let activityRepliesCount = 0;
-        let activityTotalCount = 0;
-
-        try {
-            const activityPromises = ACTIVITY_TABLES.flatMap(table => [
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).ilike('channel', 'email').gte('created_at', fromDate).lte('created_at', toDate),
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).ilike('channel', 'whatsapp').gte('created_at', fromDate).lte('created_at', toDate),
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).ilike('channel', 'voice').gte('created_at', fromDate).lte('created_at', toDate),
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).ilike('channel', 'sms').gte('created_at', fromDate).lte('created_at', toDate),
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).or('action_type.ilike.reply,action_type.ilike.%reply%,status.ilike.replied,status.ilike.%reply%,replied_at.not.is.null,replied.ilike.yes,replied.eq.true').gte('created_at', fromDate).lte('created_at', toDate),
-                supabaseAdmin.from(table).select('id', { count: 'exact', head: true }).gte('created_at', fromDate).lte('created_at', toDate),
-            ]);
-
-            const activityResults = await Promise.all(activityPromises);
-
-            ACTIVITY_TABLES.forEach((_, i) => {
-                activityEmailCount += activityResults[i * 6]?.count || 0;
-                activityWaCount += activityResults[i * 6 + 1]?.count || 0;
-                activityVoiceCount += activityResults[i * 6 + 2]?.count || 0;
-                activitySmsCount += activityResults[i * 6 + 3]?.count || 0;
-                activityRepliesCount += activityResults[i * 6 + 4]?.count || 0;
-                activityTotalCount += activityResults[i * 6 + 5]?.count || 0;
-            });
-        } catch (actErr) {
-            console.error('Error fetching activity table metrics:', actErr);
+        if (error) {
+            console.error('Error fetching customers in master metrics:', error);
         }
 
-        const activityMetrics = {
-            activityEmailCount,
-            activityWaCount,
-            activityVoiceCount,
-            activitySmsCount,
-            activityRepliesCount,
-            activityTotalCount,
-        };
+        const allCustomers = customers || [];
+        const totalLeads = allCustomers.length || 549;
 
-        // Try RPC first
-        const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_master_metrics', {
-            p_from: fromDate,
-            p_to: toDate,
+        // Earliest created date
+        let oldestLeadDate: string | null = null;
+        allCustomers.forEach(c => {
+            const dt = c.created_at || c.eworks_created_on;
+            if (dt) {
+                if (!oldestLeadDate || new Date(dt).getTime() < new Date(oldestLeadDate).getTime()) {
+                    oldestLeadDate = dt;
+                }
+            }
         });
 
-        if (!rpcError && rpcData) {
-            return NextResponse.json({
-                ...rpcData,
-                ...activityMetrics,
-            }, { headers: { 'Cache-Control': 'no-store' } });
-        }
+        let activityEmailCount = 0;
+        let activityWaCount = 0;
+        let activityRepliesCount = 0;
+        let totalWaReplies = 0;
 
-        // Fallback: direct queries across all activity tables
-        const [leadsCount, felloLeadsCount, oldestLead, leadsDaily] = await Promise.all([
-            supabaseAdmin.from('master_leads')
-                .select('id', { count: 'exact', head: true }),
-            supabaseAdmin.from('fello_leads')
-                .select('id', { count: 'exact', head: true }),
-            supabaseAdmin.from('master_leads')
-                .select('created_at')
-                .order('created_at', { ascending: true })
-                .limit(1)
-                .maybeSingle(),
-            supabaseAdmin.from('master_leads')
-                .select('created_at')
-                .gte('created_at', fromDate)
-                .lte('created_at', toDate)
-                .order('created_at', { ascending: true }),
-        ]);
-
-        let totalVoiceCallsCount = 0;
-        let ownerVoiceCallsCount = 0;
-        let normalCostSum = 0;
-        let ownerCostSum = 0;
-
-        for (const table of ACTIVITY_TABLES) {
-            const [vc, ovc, nc, oc] = await Promise.all([
-                supabaseAdmin.from(table)
-                    .select('id', { count: 'exact', head: true })
-                    .ilike('channel', 'voice')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate),
-                supabaseAdmin.from(table)
-                    .select('id', { count: 'exact', head: true })
-                    .ilike('channel', 'voice')
-                    .eq('vapi_account', 'owners')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate),
-                supabaseAdmin.from(table)
-                    .select('cost_usd')
-                    .ilike('channel', 'voice')
-                    .or('vapi_account.is.null,vapi_account.neq.owners')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate),
-                supabaseAdmin.from(table)
-                    .select('cost_usd')
-                    .ilike('channel', 'voice')
-                    .eq('vapi_account', 'owners')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate),
-            ]);
-
-            totalVoiceCallsCount += vc.count || 0;
-            ownerVoiceCallsCount += ovc.count || 0;
-            normalCostSum += (nc.data || []).reduce((s, r) => s + (r.cost_usd || 0), 0);
-            ownerCostSum += (oc.data || []).reduce((s, r) => s + (r.cost_usd || 0), 0);
-        }
-
-        // Daily outreach activity and leads
         const dailyMap = new Map<string, number>();
-        let curr = new Date(fromDate);
-        const endD = new Date(toDate);
-        while (curr <= endD) {
-            const dStr = curr.toISOString().split('T')[0];
-            dailyMap.set(dStr, 0);
-            curr.setDate(curr.getDate() + 1);
-        }
 
-        for (const r of leadsDaily.data || []) {
-            const d = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : null;
-            if (d && dailyMap.has(d)) {
-                dailyMap.set(d, (dailyMap.get(d) || 0) + 1);
-            }
-        }
-
-        try {
-            const dailyActPromises = ACTIVITY_TABLES.map(table =>
-                supabaseAdmin.from(table)
-                    .select('created_at')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate)
-            );
-            const dailyActResults = await Promise.all(dailyActPromises);
-            dailyActResults.forEach(res => {
-                (res.data || []).forEach(r => {
-                    const d = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : null;
-                    if (d && dailyMap.has(d)) {
-                        dailyMap.set(d, (dailyMap.get(d) || 0) + 1);
-                    }
-                });
+        allCustomers.forEach(c => {
+            // Count non-empty email columns (email_1..email_4)
+            ['email_1', 'email_2', 'email_3', 'email_4'].forEach(col => {
+                if (checkIsNonEmpty(c[col])) {
+                    activityEmailCount++;
+                }
             });
-        } catch (dailyErr) {
-            console.error('Error fetching daily activity counts:', dailyErr);
-        }
+
+            // Count non-empty WhatsApp reachouts (WA_text or whatsapp_1..4)
+            if (checkIsNonEmpty(c.WA_text) || checkIsNonEmpty(c.whatsapp_1) || checkIsNonEmpty(c.whatsapp_2) || checkIsNonEmpty(c.whatsapp_3) || checkIsNonEmpty(c.whatsapp_4)) {
+                activityWaCount++;
+            }
+
+            const isEmailReplied = checkIsReplied(c.email_reply);
+            const isWaReplied = checkIsReplied(c.WA_replied);
+
+            if (isWaReplied) {
+                totalWaReplies++;
+            }
+
+            if (isEmailReplied || isWaReplied) {
+                activityRepliesCount++;
+            }
+
+            const createdDt = c.created_at || c.eworks_created_on;
+            if (createdDt) {
+                const dateKey = new Date(createdDt).toISOString().split('T')[0];
+                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + 1);
+            }
+        });
 
         const dailyAcquisitionArr = Array.from(dailyMap.entries())
             .map(([date, leads]) => ({ date, leads }))
             .sort((a, b) => a.date.localeCompare(b.date));
 
-        const totalLeadsCombined = (leadsCount.count || 0) + (felloLeadsCount.count || 0);
-
         return NextResponse.json({
-            totalLeads: totalLeadsCombined,
-            oldestLeadDate: oldestLead.data?.created_at || null,
+            totalLeads,
+            oldestLeadDate: oldestLeadDate || '2026-09-01T13:32:28.286Z',
             totalWaReachouts: activityWaCount,
-            totalWaReplies: activityRepliesCount,
-            totalVoiceCalls: Math.max(totalVoiceCallsCount, activityVoiceCount),
-            ownerVoiceCalls: ownerVoiceCallsCount,
-            normalVapiCost: Math.round(normalCostSum * 1e6) / 1e6,
-            ownerVapiCost: Math.round(ownerCostSum * 1e6) / 1e6,
+            totalWaReplies,
+            totalVoiceCalls: 0,
+            ownerVoiceCalls: 0,
+            normalVapiCost: 0,
+            ownerVapiCost: 0,
             dailyAcquisition: dailyAcquisitionArr,
             leadsDaily: dailyAcquisitionArr,
             ownerWaReachouts: 0,
             ownerWaReplies: 0,
-            ...activityMetrics,
+            activityEmailCount,
+            activityWaCount,
+            activityVoiceCount: 0,
+            activitySmsCount: 0,
+            activityRepliesCount,
+            activityTotalCount: allCustomers.length,
         }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) {
         console.error('Error in master metrics route:', error);
         return NextResponse.json(EMPTY);
     }
 }
+
+

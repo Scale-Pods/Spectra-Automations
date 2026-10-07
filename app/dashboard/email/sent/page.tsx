@@ -39,18 +39,17 @@ import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 import { LMLoader } from "@/components/spectra-loader";
 import { EmailChatDetail } from "@/components/dashboard/email-chat-detail";
 
-import { SPECTRA_DUMMY_LEADS } from "@/lib/dummy-data";
-
 const ITEMS_PER_PAGE = 7;
 
 export default function SentEmailsPage() {
+    const { leads: allLeads, loadingLeads } = useData();
     const [page, setPage] = useState(1);
     const [selectedLeadItem, setSelectedLeadItem] = useState<{ id: string; initialLead?: any } | null>(null);
     const [dateRange, setDateRange] = useState<any>({
         from: subDays(new Date(), 90),
         to: new Date(),
     });
-    const loading = false;
+    const loading = loadingLeads;
     const [searchQuery, setSearchQuery] = useState("");
     const [filters, setFilters] = useState({
         campaign: "all",
@@ -59,22 +58,38 @@ export default function SentEmailsPage() {
     });
 
     const sentEmails = useMemo(() => {
-        return SPECTRA_DUMMY_LEADS.map(lead => ({
-            id: lead.id,
-            recipient: lead.name,
-            email: lead.email,
-            sender: lead.sender || "info@scalepods.co",
-            type: "Cold Message #1",
-            sentDate: lead.lastContacted,
-            rawDate: lead.created_at || lead.lastContacted,
-            subject: lead.subject || "Spectra Automation Intro",
-            body: lead.preview || "Outreach email sent via Spectra platform.",
-            content: lead.preview || "Outreach email sent via Spectra platform.",
-            campaign: "Intro Campaign",
-            hasReplied: lead.replyStatus === "Replied",
-            rawLead: lead,
-        }));
-    }, []);
+        const result: any[] = [];
+        allLeads.forEach((lead: any) => {
+            const hasReplied = lead.email_reply &&
+                String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                String(JSON.stringify(lead.email_reply)) !== 'null';
+
+            ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
+                const val = lead[col] || lead[`${col}_status`];
+                if (val && String(val).trim() !== '' && String(val).trim() !== 'null' && String(val).trim() !== 'undefined') {
+                    const recipientName = lead.full_name || lead.customer_name || lead.name || lead.email || "Lead";
+                    const sentDate = lead.created_at || lead.eworks_created_on ? format(new Date(lead.created_at || lead.eworks_created_on), "yyyy-MM-dd HH:mm") : "Recent";
+                    const rawContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                    result.push({
+                        id: `${lead.id}-email-${idx + 1}`,
+                        recipient: recipientName,
+                        email: lead.email || "",
+                        sender: lead.sender || "Outreach System",
+                        type: `EMAIL STEP ${idx + 1}`,
+                        sentDate,
+                        rawDate: lead.created_at || lead.eworks_created_on,
+                        subject: lead.subject || `Email Step ${idx + 1}`,
+                        body: rawContent,
+                        content: rawContent,
+                        campaign: lead.source_loop || lead.source_table || "Email Campaign",
+                        hasReplied: !!hasReplied,
+                        rawLead: lead,
+                    });
+                }
+            });
+        });
+        return result;
+    }, [allLeads]);
 
 
     // Dynamic filter options derived from actual database records
@@ -396,20 +411,20 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
         <Collapsible
             open={isOpen}
             onOpenChange={setIsOpen}
-            className="bg-[#0d121f]/90 backdrop-blur-xl border border-white/10 rounded-xl shadow-lg transition-all hover:border-white/20 overflow-hidden"
+            className="bg-white/90 backdrop-blur-xl border border-slate-200/80 rounded-xl shadow-md transition-all hover:border-slate-300 overflow-hidden text-slate-900"
         >
             <CollapsibleTrigger asChild>
-                <div className="p-5 cursor-pointer group hover:bg-white/[0.02] transition-colors">
+                <div className="p-5 cursor-pointer group hover:bg-slate-50/80 transition-colors">
                     <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
                         <div className="flex items-start gap-4">
-                            <div className="h-10 w-10 shrink-0 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center border border-emerald-500/20 mt-0.5">
+                            <div className="h-10 w-10 shrink-0 bg-violet-50 text-violet-600 rounded-full flex items-center justify-center border border-violet-200 mt-0.5">
                                 <Mail className="h-5 w-5" />
                             </div>
                             <div className="space-y-1.5">
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <Badge
                                         variant="secondary"
-                                        className="bg-white/10 text-slate-300 text-[10px] tracking-wider font-bold uppercase border border-white/10"
+                                        className="bg-slate-100 text-slate-700 text-[10px] tracking-wider font-bold uppercase border border-slate-200"
                                     >
                                         {email.type}
                                     </Badge>

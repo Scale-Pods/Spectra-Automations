@@ -31,7 +31,7 @@ import {
     TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-import { SPECTRA_BOUNCED_EMAILS } from "@/lib/dummy-data";
+
 
 interface BounceEmail {
     email: string;
@@ -83,17 +83,11 @@ export default function BouncedEmailsPage() {
             setBounces(data.bounced_emails || []);
 
         } catch (e: any) {
-            console.warn("Bounces API unavailable, using fallback metrics:", e);
-            const fallbackList = SPECTRA_BOUNCED_EMAILS.map(b => ({
-                email: b.email,
-                type: "Hard Bounce",
-                from: "info@scalepods.co",
-                date: b.bouncedAt
-            }));
-            setBounces(fallbackList);
+            console.warn("Bounces API fetch error:", e);
+            setBounces([]);
             setSummary({
-                total_bounces: fallbackList.length,
-                hard_bounces: fallbackList.length,
+                total_bounces: 0,
+                hard_bounces: 0,
                 soft_bounces: 0,
                 technical_bounces: 0
             });

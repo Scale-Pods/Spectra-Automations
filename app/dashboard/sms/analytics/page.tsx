@@ -258,13 +258,13 @@ export default function SmsAnalyticsPage() {
             {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Daily Performance Bar Chart */}
-                <Card className="lg:col-span-2 bg-[var(--glass-fill)] backdrop-blur-[24px] border border-[var(--separator)] shadow-xl">
+                <Card className="lg:col-span-2 bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg font-bold text-white flex items-center justify-between">
+                        <CardTitle className="text-lg font-bold text-slate-900 flex items-center justify-between">
                             <span>SMS Sent vs Replies Over Time</span>
-                            <Badge variant="outline" className="text-amber-400 border-amber-500/30 text-xs">SMS Telemetry</Badge>
+                            <Badge variant="outline" className="text-amber-700 bg-amber-50 border-amber-200 text-xs font-semibold">SMS Telemetry</Badge>
                         </CardTitle>
-                        <CardDescription className="text-slate-400 text-xs">Daily outbound SMS volume compared against inbound lead replies</CardDescription>
+                        <CardDescription className="text-slate-500 text-xs">Daily outbound SMS volume compared against inbound lead replies</CardDescription>
                     </CardHeader>
                     <CardContent className="pt-4 h-[320px]">
                         {stats.dailyTrend.length === 0 ? (
@@ -274,11 +274,11 @@ export default function SmsAnalyticsPage() {
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={stats.dailyTrend}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                     <XAxis dataKey="day" stroke="#64748b" tick={{ fontSize: 12 }} />
                                     <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
-                                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff' }} />
-                                    <Bar dataKey="sent" name="Outbound SMS" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                                    <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: '#E2E8F0', borderRadius: '12px', color: '#0f172a' }} />
+                                    <Bar dataKey="sent" name="Outbound SMS" fill="#7C3AED" radius={[4, 4, 0, 0]} />
                                     <Bar dataKey="replies" name="Inbound Replies" fill="#10b981" radius={[4, 4, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
@@ -287,10 +287,10 @@ export default function SmsAnalyticsPage() {
                 </Card>
 
                 {/* Lead Sentiment Distribution */}
-                <Card className="bg-[var(--glass-fill)] backdrop-blur-[24px] border border-[var(--separator)] shadow-xl">
+                <Card className="bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg font-bold text-white">SMS Lead Sentiment</CardTitle>
-                        <CardDescription className="text-slate-400 text-xs">Interest classification of SMS contacts</CardDescription>
+                        <CardTitle className="text-lg font-bold text-slate-900">SMS Lead Sentiment</CardTitle>
+                        <CardDescription className="text-slate-500 text-xs">Interest classification of SMS contacts</CardDescription>
                     </CardHeader>
                     <CardContent className="pt-4 flex flex-col items-center justify-center h-[320px]">
                         <ResponsiveContainer width="100%" height={190}>
@@ -306,15 +306,15 @@ export default function SmsAnalyticsPage() {
                                         <Cell key={`cell-${index}`} fill={entry.color} />
                                     ))}
                                 </Pie>
-                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff' }} />
+                                <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: '#E2E8F0', borderRadius: '12px', color: '#0f172a' }} />
                             </PieChart>
                         </ResponsiveContainer>
                         <div className="grid grid-cols-3 gap-2 w-full mt-2 text-center">
                             {stats.tempData.map((d, i) => (
                                 <div key={i} className="flex flex-col items-center">
                                     <span className="w-2.5 h-2.5 rounded-full mb-1" style={{ backgroundColor: d.color }} />
-                                    <span className="text-[10px] text-slate-400 uppercase font-semibold">{d.name}</span>
-                                    <span className="text-sm font-bold text-white">{d.value}</span>
+                                    <span className="text-[10px] text-slate-500 uppercase font-semibold">{d.name}</span>
+                                    <span className="text-sm font-bold text-slate-900">{d.value}</span>
                                 </div>
                             ))}
                         </div>
@@ -323,23 +323,23 @@ export default function SmsAnalyticsPage() {
             </div>
 
             {/* SMS Campaign Loop Breakdown Table */}
-            <Card className="bg-[var(--glass-fill)] backdrop-blur-[24px] border border-[var(--separator)] shadow-xl">
+            <Card className="bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md">
                 <CardHeader>
-                    <CardTitle className="text-lg font-bold text-white">SMS Campaign Performance Breakdown</CardTitle>
-                    <CardDescription className="text-slate-400 text-xs">Conversion and engagement rate metrics by specific SMS campaign loop</CardDescription>
+                    <CardTitle className="text-lg font-bold text-slate-900">SMS Campaign Performance Breakdown</CardTitle>
+                    <CardDescription className="text-slate-500 text-xs">Conversion and engagement rate metrics by specific SMS campaign loop</CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm border-collapse">
                             <thead>
-                                <tr className="border-b border-white/10 bg-white/[0.03] text-slate-400 text-xs uppercase tracking-wider font-semibold">
+                                <tr className="border-b border-slate-200 bg-slate-50/80 text-slate-600 text-xs uppercase tracking-wider font-semibold">
                                     <th className="py-3 px-4">Campaign Loop Name</th>
                                     <th className="py-3 px-4">Outbound SMS Dispatched</th>
                                     <th className="py-3 px-4">Replies Received</th>
                                     <th className="py-3 px-4 text-right">Conversion Rate</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-white/5 text-slate-200">
+                            <tbody className="divide-y divide-slate-100 text-slate-700">
                                 {stats.campaignCounts.length === 0 ? (
                                     <tr>
                                         <td colSpan={4} className="py-8 text-center text-slate-400 text-sm">
@@ -348,15 +348,15 @@ export default function SmsAnalyticsPage() {
                                     </tr>
                                 ) : (
                                     stats.campaignCounts.map((camp, idx) => (
-                                        <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
-                                            <td className="py-3.5 px-4 font-semibold text-white flex items-center gap-2">
-                                                <Smartphone className="h-4 w-4 text-amber-400" />
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                            <td className="py-3.5 px-4 font-semibold text-slate-900 flex items-center gap-2">
+                                                <Smartphone className="h-4 w-4 text-violet-600" />
                                                 {camp.name}
                                             </td>
-                                            <td className="py-3.5 px-4 font-mono text-slate-300">
+                                            <td className="py-3.5 px-4 font-mono text-slate-600">
                                                 {camp.sent}
                                             </td>
-                                            <td className="py-3.5 px-4 font-mono text-emerald-400 font-bold">
+                                            <td className="py-3.5 px-4 font-mono text-emerald-600 font-bold">
                                                 {camp.replies}
                                             </td>
                                             <td className="py-3.5 px-4 text-right">

@@ -3,16 +3,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
-/**
- * Public API for share links — no auth required.
- * Fetches activity logs by phone number (WhatsApp/SMS) or email.
- * 
- * GET /api/public/share?channel=whatsapp&phone=%2B12345678900
- * GET /api/public/share?channel=sms&phone=%2B12345678900
- * GET /api/public/share?channel=email&email=user@example.com
- */
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
@@ -27,68 +17,87 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const activities: any[] = [];
+        // Query customers for lookup
+        const { data: customerRows } = await supabaseAdmin
+            .from('customers')
+            .select('*');
 
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                let query = supabaseAdmin
-                    .from(table)
-                    .select('*')
-                    .ilike('channel', channel)
-                    .order('created_at', { ascending: true });
+        const customers = customerRows || [];
+        const customerMap = new Map<string, any>();
+        customers.forEach(c => customerMap.set(c.id, c));
 
-                if (phone) {
-                    // Strip non-digit chars for fuzzy match
-                    const cleanPhone = phone.replace(/\D/g, '');
-                    // Use ilike to match the phone number in lead_phone column
-                    query = query.ilike('lead_phone', `%${cleanPhone.slice(-10)}%`);
-                } else if (email) {
-                    query = query.ilike('lead_email', `%${email.trim()}%`);
-                }
-
-                const { data, error } = await query.limit(200);
-
-                if (!error && data && data.length > 0) {
-                    activities.push(...data.map((row: any) => ({ ...row, _source_table: table })));
-                }
-            } catch {
-                // skip unavailable tables
+        // Find customer if matching phone/email
+        let matchedCustomer = customers.find(c => {
+            if (phone) {
+                const cleanInput = phone.replace(/\D/g, '').slice(-10);
+                const cleanCPhone = (c.phone_e164 || c.mobile_raw || '').replace(/\D/g, '');
+                if (cleanInput && cleanCPhone.includes(cleanInput)) return true;
             }
+            if (email && c.email) {
+                if (c.email.trim().toLowerCase() === email.trim().toLowerCase()) return true;
+            }
+            return false;
+        });
+
+        let msgQuery = supabaseAdmin
+            .from('messages')
+            .select('*')
+            .ilike('channel', channel);
+
+        if (matchedCustomer) {
+            msgQuery = msgQuery.eq('customer_id', matchedCustomer.id);
+        } else if (phone) {
+            const cleanInput = phone.replace(/\D/g, '').slice(-10);
+            msgQuery = msgQuery.or(`sender_address.ilike.%${cleanInput}%,recipient_address.ilike.%${cleanInput}%`);
+        } else if (email) {
+            msgQuery = msgQuery.or(`sender_address.ilike.%${email}%,recipient_address.ilike.%${email}%`);
         }
 
-        // Deduplicate by id
-        const seen = new Set<string>();
-        const unique = activities.filter(a => {
-            const key = String(a.id);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
+        const { data: messages } = await msgQuery.order('created_at', { ascending: true }).limit(200);
+
+        const activities = (messages || []).map((m: any) => {
+            const cust = customerMap.get(m.customer_id) || matchedCustomer || {};
+            const custName = cust.full_name || cust.customer_name || 'Customer';
+            const isReply = m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
+
+            return {
+                id: m.id,
+                lead_id: m.customer_id,
+                lead_name: custName,
+                lead_phone: cust.phone_e164 || m.sender_address || m.recipient_address || phone,
+                lead_email: cust.email || m.sender_address || m.recipient_address || email,
+                channel: m.channel,
+                action_type: m.channel,
+                direction: m.direction,
+                status: m.status || (isReply ? 'replied' : 'sent'),
+                replied: isReply ? 'yes' : 'no',
+                WP_Replied_track: isReply ? 'Replied' : '',
+                content: m.body_text || m.subject || '',
+                note: m.body_text || m.subject || '',
+                summary: m.subject || m.body_text || '',
+                created_at: m.sent_or_received_at || m.created_at,
+                _source_table: 'messages'
+            };
         });
 
-        // Sort by created_at ascending (oldest first = chronological chat order)
-        unique.sort((a, b) => {
-            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return da - db;
-        });
-
-        // Derive lead metadata from the first activity row
-        const first = unique[0] || null;
-        const lead = first ? {
-            id: first.lead_id || first.id,
-            name: first.lead_name || phone || email,
-            phone: first.lead_phone || phone,
-            email: first.lead_email || email,
-            campaign: first.campaign || first.source_loop || '',
-            status: first.status || '',
-            source_table: first._source_table || first.source_table || '',
-            action_type: first.action_type || '',
-            summary: first.summary || '',
-            lead_temp: first.lead_temp || first.lead_temperature || first.sentiment || '',
-        } : null;
+        const lead = matchedCustomer ? {
+            id: matchedCustomer.id,
+            name: matchedCustomer.full_name || matchedCustomer.customer_name,
+            phone: matchedCustomer.phone_e164 || phone,
+            email: matchedCustomer.email || email,
+            status: matchedCustomer.WA_replied ? 'Replied' : 'Active',
+            source_table: 'customers'
+        } : (activities[0] ? {
+            id: activities[0].lead_id,
+            name: activities[0].lead_name,
+            phone: activities[0].lead_phone,
+            email: activities[0].lead_email,
+            status: activities[0].status,
+            source_table: 'messages'
+        } : null);
 
         return NextResponse.json(
-            { lead, activities: unique },
+            { lead, activities },
             {
                 status: 200,
                 headers: {
@@ -105,3 +114,4 @@ export async function GET(request: NextRequest) {
         );
     }
 }
+

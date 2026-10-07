@@ -3,7 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['aspen_activity', 'fello_activity', 'naples_activity', 'old_activity'] as const;
+function checkIsNonEmpty(val: any): boolean {
+    if (val === null || val === undefined) return false;
+    const str = String(val).trim();
+    return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+}
 
 export async function GET(request: Request) {
     try {
@@ -11,70 +15,66 @@ export async function GET(request: Request) {
         const from = searchParams.get('start_date');
         const to = searchParams.get('end_date');
 
-        const fromDate = from ? new Date(from).toISOString() : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to ? new Date(to).toISOString() : new Date().toISOString();
+        // Check customers table for email columns
+        const { data: customerRows } = await supabaseAdmin
+            .from('customers')
+            .select('id, created_at, eworks_created_on, email_1, email_1_status, email_2, email_2_status, email_3, email_3_status, email_4, email_4_status, email_reply, email_unsubscribed');
 
-        const tableStats: Record<string, { name: string; totalSent: number; totalReplies: number; totalUnsubscribed: number }> = {
-            aspen_activity: { name: 'Aspen', totalSent: 0, totalReplies: 0, totalUnsubscribed: 0 },
-            fello_activity: { name: 'Fello', totalSent: 0, totalReplies: 0, totalUnsubscribed: 0 },
-            naples_activity: { name: 'Naples', totalSent: 0, totalReplies: 0, totalUnsubscribed: 0 },
-            old_activity: { name: 'Old Leads', totalSent: 0, totalReplies: 0, totalUnsubscribed: 0 },
-        };
-
+        let totalSent = 0;
+        let totalReplies = 0;
+        let totalUnsubscribed = 0;
         const dailyMap: Record<string, { date: string; sent: number; replies: number }> = {};
-        let grandTotalSent = 0;
-        let grandTotalReplies = 0;
-        let grandTotalUnsubscribed = 0;
 
-        for (const table of ACTIVITY_TABLES) {
-            const { data, error } = await supabaseAdmin
-                .from(table)
-                .select('*')
-                .gte('created_at', fromDate)
-                .lte('created_at', toDate);
-
-            if (!error && data) {
-                data.forEach((row: any) => {
-                    const channel = String(row.channel || '').toLowerCase();
-                    const actionType = String(row.action_type || '').toLowerCase();
-                    const status = String(row.status || '').toLowerCase();
-
-                    const isEmail = channel.includes('email') || actionType.includes('email') || !!row.lead_email;
-                    if (isEmail && channel !== 'voice' && channel !== 'whatsapp' && channel !== 'sms') {
-                        grandTotalSent++;
-                        tableStats[table].totalSent++;
-
-                        const isReply = status.includes('reply') || actionType.includes('reply') || !!row.replied_at;
-                        if (isReply) {
-                            grandTotalReplies++;
-                            tableStats[table].totalReplies++;
-                        }
-
-                        const isUnsub = status.includes('unsubscribed') || actionType.includes('unsubscribed');
-                        if (isUnsub) {
-                            grandTotalUnsubscribed++;
-                            tableStats[table].totalUnsubscribed++;
-                        }
-
-                        if (row.created_at) {
-                            const dateKey = new Date(row.created_at).toISOString().split('T')[0];
-                            if (!dailyMap[dateKey]) {
-                                dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
-                            }
-                            dailyMap[dateKey].sent++;
-                            if (isReply) dailyMap[dateKey].replies++;
-                        }
-                    }
-                });
-            }
+        function checkIsReplied(val: any): boolean {
+            if (val === null || val === undefined) return false;
+            if (Array.isArray(val)) return val.length > 0;
+            if (typeof val === 'object') return Object.keys(val).length > 0;
+            const str = String(val).trim().toLowerCase();
+            return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
         }
+
+        (customerRows || []).forEach((c: any) => {
+            ['email_1', 'email_2', 'email_3', 'email_4'].forEach(col => {
+                if (checkIsNonEmpty(c[col])) {
+                    totalSent++;
+                    const dateStr = c.created_at || c.eworks_created_on;
+                    if (dateStr) {
+                        const dateKey = new Date(dateStr).toISOString().split('T')[0];
+                        if (!dailyMap[dateKey]) {
+                            dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                        }
+                        dailyMap[dateKey].sent++;
+                    }
+                }
+            });
+
+            if (checkIsReplied(c.email_reply)) {
+                totalReplies++;
+                const dateStr = c.created_at || c.eworks_created_on;
+                if (dateStr) {
+                    const dateKey = new Date(dateStr).toISOString().split('T')[0];
+                    if (!dailyMap[dateKey]) {
+                        dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                    }
+                    dailyMap[dateKey].replies++;
+                }
+            }
+
+            if (c.email_unsubscribed === true) {
+                totalUnsubscribed++;
+            }
+        });
 
         const dailyHistory = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
 
+        const tableStats = {
+            customers: { name: 'Live Customer Emails', totalSent, totalReplies, totalUnsubscribed }
+        };
+
         return NextResponse.json({
-            totalSent: grandTotalSent,
-            totalReplies: grandTotalReplies,
-            totalUnsubscribed: grandTotalUnsubscribed,
+            totalSent,
+            totalReplies,
+            totalUnsubscribed,
             tableStats,
             dailyHistory,
         }, {
@@ -89,3 +89,5 @@ export async function GET(request: Request) {
         );
     }
 }
+
+

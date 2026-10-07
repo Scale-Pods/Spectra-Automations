@@ -156,14 +156,14 @@ export default function PublicSMSSharePage({ params }: { params: Promise<{ leadI
     };
 
     return (
-        <div className="h-screen max-h-screen bg-[#0a0d14] text-white flex flex-col items-center justify-center p-3 md:p-6 relative overflow-hidden">
-            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-amber-600/20 blur-[120px] pointer-events-none z-0" />
-            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-orange-600/15 blur-[120px] pointer-events-none z-0" />
+        <div className="h-screen max-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col items-center justify-center p-3 md:p-6 relative overflow-hidden">
+            <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-violet-400/10 blur-[120px] pointer-events-none z-0" />
+            <div className="fixed -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-purple-400/10 blur-[120px] pointer-events-none z-0" />
 
-            <div className="w-full max-w-5xl h-[85vh] max-h-[800px] bg-[#0d121f]/90 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl p-4 sm:p-5 flex flex-col relative z-10 overflow-hidden">
+            <div className="w-full max-w-5xl h-[85vh] max-h-[800px] bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-xl p-4 sm:p-5 flex flex-col relative z-10 overflow-hidden">
 
                 <div className="mb-3 flex items-center justify-between shrink-0">
-                    <span className="text-xs font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full font-semibold">
+                    <span className="text-xs font-mono text-violet-700 bg-violet-50 border border-violet-200 px-3 py-1 rounded-full font-semibold">
                         💬 SMS Conversation • {decodedLeadId}
                     </span>
                     <div className="flex items-center gap-2">

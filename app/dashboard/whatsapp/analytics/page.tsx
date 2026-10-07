@@ -327,16 +327,16 @@ export default function WhatsappAnalyticsPage() {
             {/* Visual Analytics Graphs */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Engagement & Reply Volume Trend Chart */}
-                <Card className="lg:col-span-2 border-white/10 shadow-xl bg-[#0d121f] text-white">
+                <Card className="lg:col-span-2 border-slate-200/80 shadow-md bg-white/90 text-slate-900">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <div>
-                            <CardTitle className="text-base font-bold text-white flex items-center gap-2">
-                                <BarChart3 className="h-5 w-5 text-emerald-400" />
+                            <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                                <BarChart3 className="h-5 w-5 text-emerald-600" />
                                 WhatsApp Reachout & Response Volume
                             </CardTitle>
-                            <CardDescription className="text-slate-400">Daily breakdown of messages sent vs replies received</CardDescription>
+                            <CardDescription className="text-slate-500">Daily breakdown of messages sent vs replies received</CardDescription>
                         </div>
-                        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-xs">
+                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs font-semibold">
                             Live Trend
                         </Badge>
                     </CardHeader>
@@ -346,27 +346,27 @@ export default function WhatsappAnalyticsPage() {
                                 <AreaChart data={stats.trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorWaSent" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
+                                            <stop offset="5%" stopColor="#7C3AED" stopOpacity={0.3} />
+                                            <stop offset="95%" stopColor="#7C3AED" stopOpacity={0.0} />
                                         </linearGradient>
                                         <linearGradient id="colorWaReplied" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                                             <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                                    <XAxis dataKey="date" stroke="#8E8E93" fontSize={11} tickLine={false} axisLine={false} />
-                                    <YAxis stroke="#8E8E93" fontSize={11} tickLine={false} axisLine={false} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                    <XAxis dataKey="date" stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="#64748B" fontSize={11} tickLine={false} axisLine={false} />
                                     <Tooltip
                                         contentStyle={{
-                                            backgroundColor: '#0f172a',
+                                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
                                             borderRadius: '12px',
-                                            border: '1px solid rgba(255,255,255,0.1)',
-                                            color: '#fff',
-                                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)'
+                                            border: '1px solid #E2E8F0',
+                                            color: '#0f172a',
+                                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.08)'
                                         }}
                                     />
-                                    <Area type="monotone" dataKey="sent" name="Reachouts Sent" stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#colorWaSent)" />
+                                    <Area type="monotone" dataKey="sent" name="Reachouts Sent" stroke="#7C3AED" strokeWidth={2.5} fillOpacity={1} fill="url(#colorWaSent)" />
                                     <Area type="monotone" dataKey="replied" name="Replies Received" stroke="#10b981" strokeWidth={2.5} fillOpacity={1} fill="url(#colorWaReplied)" />
                                 </AreaChart>
                             </ResponsiveContainer>
@@ -375,13 +375,13 @@ export default function WhatsappAnalyticsPage() {
                 </Card>
 
                 {/* Delivery & Response Breakdown Donut */}
-                <Card className="border-white/10 shadow-xl bg-[#0d121f] text-white">
+                <Card className="border-slate-200/80 shadow-md bg-white/90 text-slate-900">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-bold text-white flex items-center gap-2">
-                            <PieIcon className="h-5 w-5 text-purple-400" />
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <PieIcon className="h-5 w-5 text-purple-600" />
                             Engagement Breakdown
                         </CardTitle>
-                        <CardDescription className="text-slate-400">Proportional status of WhatsApp campaigns</CardDescription>
+                        <CardDescription className="text-slate-500">Proportional status of WhatsApp campaigns</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[320px] w-full flex flex-col items-center justify-center">
@@ -409,10 +409,10 @@ export default function WhatsappAnalyticsPage() {
                                                 name
                                             ]}
                                             contentStyle={{
-                                                backgroundColor: '#0f172a',
+                                                backgroundColor: 'rgba(255, 255, 255, 0.95)',
                                                 borderRadius: '12px',
-                                                border: '1px solid rgba(255,255,255,0.1)',
-                                                color: '#fff'
+                                                border: '1px solid #E2E8F0',
+                                                color: '#0f172a'
                                             }}
                                         />
                                         <Legend
@@ -422,7 +422,7 @@ export default function WhatsappAnalyticsPage() {
                                                 const item = stats.statusPieData.find((d: any) => d.name === value);
                                                 const val = item ? item.value : 0;
                                                 const pct = stats.sentCount > 0 ? ((val / stats.sentCount) * 100).toFixed(0) : '0';
-                                                return <span className="text-xs font-medium text-slate-300">{value} ({val.toLocaleString()} - {pct}%)</span>;
+                                                return <span className="text-xs font-medium text-slate-600">{value} ({val.toLocaleString()} - {pct}%)</span>;
                                             }}
                                         />
                                     </PieChart>
@@ -434,14 +434,14 @@ export default function WhatsappAnalyticsPage() {
             </div>
 
             {/* Conversion Funnel Bar Chart */}
-            <Card className="border-white/10 shadow-xl bg-[#0d121f] text-white">
+            <Card className="border-slate-200/80 shadow-md bg-white/90 text-slate-900">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <div>
-                        <CardTitle className="text-base font-bold text-white flex items-center gap-2">
-                            <TrendingUp className="h-5 w-5 text-indigo-400" />
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <TrendingUp className="h-5 w-5 text-indigo-600" />
                             WhatsApp Conversion Funnel
                         </CardTitle>
-                        <CardDescription className="text-slate-400">Progression from Contacted Leads to Outbound Messages & Inbound Replies</CardDescription>
+                        <CardDescription className="text-slate-500">Progression from Contacted Leads to Outbound Messages & Inbound Replies</CardDescription>
                     </div>
                 </CardHeader>
                 <CardContent>

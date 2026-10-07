@@ -90,6 +90,20 @@ export function calculateEmailMetrics(
         return d >= fromD && d <= toD;
     };
 
+    function checkIsNonEmpty(val: any): boolean {
+        if (val === null || val === undefined) return false;
+        const str = String(val).trim();
+        return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
+    }
+
+    function checkIsReplied(val: any): boolean {
+        if (val === null || val === undefined) return false;
+        if (Array.isArray(val)) return val.length > 0;
+        if (typeof val === 'object') return Object.keys(val).length > 0;
+        const str = String(val).trim().toLowerCase();
+        return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
+    }
+
     let totalEmails = 0;
     let firstEmailCount = 0;
     let replyCount = 0;
@@ -97,118 +111,33 @@ export function calculateEmailMetrics(
     let totalLeadsCount = 0;
 
     const tableStats = {
-        naples: { name: "Naples (naples_activity)", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
-        aspen: { name: "Aspen (aspen_activity)", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
-        old: { name: "Old Leads (old_activity)", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
-        fello: { name: "Fello (fello_activity)", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
+        naples: { name: "Naples", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
+        aspen: { name: "Aspen", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
+        old: { name: "Old Leads", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
+        fello: { name: "Fello", totalLeads: 0, emails: 0, replies: 0, unsubscribed: 0 },
     };
 
     const dailyMap: Record<string, { date: string; sent: number; replies: number }> = {};
     const processedIds = new Set<string>();
 
     (allLeads || []).forEach((lead: any) => {
-        if (lead.id && processedIds.has(String(lead.id))) return;
-        if (lead.id) processedIds.add(String(lead.id));
+        const rawId = String(lead.eworks_customer_id || lead.email || lead.id || '').replace(/^(intro|master|nurture|followup|act-tbl|act-messages|act)-/i, '');
+        if (rawId && processedIds.has(rawId)) return;
+        if (rawId) processedIds.add(rawId);
 
         const tableKey = getLeadSourceTableKey(lead);
-        const channel = String(lead.channel || '').toLowerCase();
-        const actionType = String(lead.action_type || '').toLowerCase();
-        const status = String(lead.status || '').toLowerCase();
-
-        // 1. Activity Table Records (aspen_activity, fello_activity, naples_activity, old_activity)
-        if (lead._source_table || channel) {
-            const isEmail = channel.includes('email') || actionType.includes('email');
-
-            if (isEmail && channel !== 'voice' && channel !== 'whatsapp' && channel !== 'sms') {
-                const rawDate = lead.created_at || lead.updated_at || lead['1st_email_ts'] || lead.last_email_at;
-                const actDate = parseMsgDate(rawDate);
-                if (checkDate(actDate)) {
-                    totalLeadsCount++;
-                    tableStats[tableKey].totalLeads++;
-
-                    totalEmails++;
-                    tableStats[tableKey].emails++;
-
-                    if (actionType.includes('1') || actionType.includes('initial')) {
-                        firstEmailCount++;
-                    }
-
-                    // Replies
-                    const isReply = status.includes('replied') ||
-                        status.includes('reply') ||
-                        actionType.includes('reply') ||
-                        actionType.includes('inbound') ||
-                        !!lead.replied_at;
-                    if (isReply) {
-                        replyCount++;
-                        tableStats[tableKey].replies++;
-                    }
-
-                    // Unsubscribed
-                    const isUnsub = status.includes('unsubscribed') ||
-                        actionType.includes('unsubscribed') ||
-                        String(lead.unsubscribed || '').toLowerCase().includes('yes');
-                    if (isUnsub) {
-                        unsubscribedCount++;
-                        tableStats[tableKey].unsubscribed++;
-                    }
-
-                    // Chart grouping
-                    if (actDate && !isNaN(actDate.getTime())) {
-                        const dateKey = format(actDate, "MMM dd");
-                        if (!dailyMap[dateKey]) {
-                            dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
-                        }
-                        dailyMap[dateKey].sent++;
-                        if (isReply) dailyMap[dateKey].replies++;
-                    }
-                }
-            }
-            return;
-        }
-
-        // 2. Legacy / Master / Nurture Lead Records
         let leadHasEmail = false;
 
-        // Check Replies
-        const emailReply = lead.email_replied;
-        if (emailReply && !["no", "none", ""].includes(String(emailReply).toLowerCase().trim())) {
-            const parsedDate = parseMsgDate(emailReply) || (lead.updated_at || lead.created_at ? new Date(lead.updated_at || lead.created_at) : null);
-            if (checkDate(parsedDate)) {
-                leadHasEmail = true;
-                replyCount++;
-                tableStats[tableKey].replies++;
-            }
-        }
-
-        // Check Unsubscribed
-        if (lead.unsubscribed && String(lead.unsubscribed).toLowerCase().includes("yes")) {
-            const unsubDate = lead.updated_at || lead.created_at ? new Date(lead.updated_at || lead.created_at) : null;
-            if (checkDate(unsubDate)) {
-                leadHasEmail = true;
-                unsubscribedCount++;
-                tableStats[tableKey].unsubscribed++;
-            }
-        }
-
-        // Check Stages / Emails Sent
-        const stageData = lead.stage_data || {};
-        const stages = lead.stages_passed || [];
-
-        stages.forEach((stage: string) => {
-            const s = stage.toLowerCase().trim();
-            if (!s.startsWith("email_")) return;
-
-            const rawContent = stageData[stage];
-            const emailDate = parseMsgDate(rawContent) || (lead.created_at ? new Date(lead.created_at) : null);
-
-            if (checkDate(emailDate)) {
-                leadHasEmail = true;
+        // Count non-empty email_1..email_4 steps
+        ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
+            if (checkIsNonEmpty(lead[col]) || checkIsNonEmpty(lead[`${col}_status`])) {
                 totalEmails++;
                 tableStats[tableKey].emails++;
-                if (s === "email_1") firstEmailCount++;
+                leadHasEmail = true;
+                if (idx === 0) firstEmailCount++;
 
-                if (emailDate && !isNaN(emailDate.getTime())) {
+                const emailDate = lead.created_at || lead.eworks_created_on ? new Date(lead.created_at || lead.eworks_created_on) : null;
+                if (emailDate && !isNaN(emailDate.getTime()) && checkDate(emailDate)) {
                     const dateKey = format(emailDate, "MMM dd");
                     if (!dailyMap[dateKey]) {
                         dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
@@ -218,7 +147,49 @@ export function calculateEmailMetrics(
             }
         });
 
-        if (leadHasEmail) {
+        // Check Email Replies
+        if (checkIsReplied(lead.email_reply)) {
+            leadHasEmail = true;
+            replyCount++;
+            tableStats[tableKey].replies++;
+
+            let replyDate: Date | null = null;
+            if (Array.isArray(lead.email_reply)) {
+                lead.email_reply.forEach((r: any) => {
+                    const dStr = r.received_at || r.sent_at || r.created_at;
+                    if (dStr) {
+                        const d = new Date(dStr);
+                        if (!isNaN(d.getTime())) replyDate = d;
+                    }
+                });
+            } else if (typeof lead.email_reply === 'object') {
+                const dStr = lead.email_reply.received_at || lead.email_reply.sent_at || lead.email_reply.created_at;
+                if (dStr) {
+                    const d = new Date(dStr);
+                    if (!isNaN(d.getTime())) replyDate = d;
+                }
+            }
+            if (!replyDate && (lead.updated_at || lead.created_at)) {
+                replyDate = new Date(lead.updated_at || lead.created_at);
+            }
+
+            if (replyDate && !isNaN(replyDate.getTime()) && checkDate(replyDate)) {
+                const dateKey = format(replyDate, "MMM dd");
+                if (!dailyMap[dateKey]) {
+                    dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                }
+                dailyMap[dateKey].replies++;
+            }
+        }
+
+        // Check Unsubscribed
+        if (lead.email_unsubscribed === true || (lead.unsubscribed && String(lead.unsubscribed).toLowerCase().includes("yes"))) {
+            leadHasEmail = true;
+            unsubscribedCount++;
+            tableStats[tableKey].unsubscribed++;
+        }
+
+        if (leadHasEmail || (lead.email && String(lead.email).trim() !== '' && String(lead.email).toLowerCase() !== 'no email')) {
             totalLeadsCount++;
             tableStats[tableKey].totalLeads++;
         }
@@ -236,11 +207,12 @@ export function calculateEmailMetrics(
         totalReplies: replyCount,
         unsubscribedCount,
         totalUnsubscribed: unsubscribedCount,
-        totalLeadsCount,
-        totalLeads: totalLeadsCount,
+        totalLeadsCount: totalLeadsCount || (allLeads ? allLeads.length : 0),
+        totalLeads: totalLeadsCount || (allLeads ? allLeads.length : 0),
         replyRate,
         unsubRate,
         tableStats,
         dailyChartData,
     };
 }
+

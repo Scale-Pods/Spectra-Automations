@@ -3,107 +3,98 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const from = searchParams.get('from');
         const to = searchParams.get('to');
 
-        const fromDate = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        // Fetch customers from live public.customers table
+        let query = supabaseAdmin
+            .from('customers')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-        let nrWf: any[] = [];
-        let followup: any[] = [];
-        let nurture: any[] = [];
-        let masterLeads: any[] = [];
-
-        // Try RPC first
-        const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_leads_for_display', {
-            p_from: fromDate,
-            p_to: toDate,
-        });
-
-        if (!rpcError && rpcData) {
-            nrWf = rpcData.nr_wf || [];
-            followup = rpcData.followup || [];
-            nurture = rpcData.nurture || [];
-            masterLeads = rpcData.master_leads || [];
-        } else {
-            if (rpcError) {
-                console.error('RPC get_leads_for_display error, performing fallback queries:', rpcError.message);
-            }
-            // Fallback: direct queries on master_leads and fello_leads
-            const [masterRes, felloRes] = await Promise.all([
-                supabaseAdmin
-                    .from('master_leads')
-                    .select('*')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate)
-                    .order('created_at', { ascending: false }),
-                supabaseAdmin
-                    .from('fello_leads')
-                    .select('*')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate)
-                    .order('created_at', { ascending: false }),
-            ]);
-
-            masterLeads = masterRes.data || [];
-            nrWf = felloRes.data || [];
+        if (from) {
+            query = query.gte('created_at', from);
+        }
+        if (to) {
+            query = query.lte('created_at', to);
         }
 
-        // Fetch activity leads from activity tables (combining date-filtered and explicit replied leads)
-        const activityLeads: any[] = [];
-        const seenActivityKeys = new Set<string>();
+        const { data: customerRows, error: custError } = await query;
 
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                const [dateRes, replyRes] = await Promise.all([
-                    supabaseAdmin
-                        .from(table)
-                        .select('*')
-                        .gte('created_at', fromDate)
-                        .lte('created_at', toDate)
-                        .order('created_at', { ascending: false })
-                        .limit(500),
-                    supabaseAdmin
-                        .from(table)
-                        .select('*')
-                        .or('replied.ilike.yes,replied.eq.true,status.ilike.%reply%,status.ilike.%replied%,action_type.ilike.%reply%')
-                        .order('created_at', { ascending: false })
-                        .limit(500)
-                ]);
-
-                const combinedRows = [...(dateRes.data || []), ...(replyRes.data || [])];
-                for (const row of combinedRows) {
-                    const key = `${table}-${row.id}`;
-                    if (!seenActivityKeys.has(key)) {
-                        seenActivityKeys.add(key);
-                        activityLeads.push({
-                            ...row,
-                            _source_table: table,
-                        });
-                    }
-                }
-            } catch {
-                // skip tables that don't exist
-            }
+        let allCustomers = customerRows || [];
+        
+        // If date filter was too narrow and yielded 0 records, fetch top 500 customers
+        if (allCustomers.length === 0) {
+            const { data: fallbackCustomers } = await supabaseAdmin
+                .from('customers')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(500);
+            allCustomers = fallbackCustomers || [];
         }
 
-        activityLeads.sort((a, b) => {
-            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return db - da;
+        // Map customers into master_leads, nr_wf, followup, nurture
+        const mappedLeads = allCustomers.map((c: any) => {
+            const name = c.full_name || c.customer_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Customer';
+            const phone = c.phone_e164 || c.mobile_raw || c.telephone_raw || '';
+            const rVal = String(c.WA_replied || '').trim().toLowerCase();
+            const isWaReplied = rVal !== '' && rVal !== 'no' && rVal !== 'false' && rVal !== 'null' && rVal !== 'undefined';
+
+            return {
+                ...c, // Spread ALL database row columns (WA_text, WA_sentiment, WA_note, quotes, jobs, etc.)
+                id: c.id,
+                eworks_customer_id: c.eworks_customer_id,
+                Name: name,
+                name: name,
+                full_name: name,
+                Email: c.email || '',
+                email: c.email || '',
+                Phone: phone,
+                phone: phone,
+                phone_e164: phone,
+                city: c.city || 'Dubai',
+                address: c.address_line || '',
+                notes: c.notes || '',
+                created_at: c.created_at || c.eworks_created_on || new Date().toISOString(),
+                sequence_channel: c.sequence_channel || 'WHATSAPP',
+                sequence_step: c.sequence_step || 1,
+                WA_replied: c.WA_replied || 'NO',
+                WP_Replied_track: isWaReplied ? (c.WA_replied || 'Replied') : '',
+                replied: isWaReplied ? (c.WA_replied || 'yes') : 'no',
+                whatsapp_count: (c.whatsapp_1 || c.whatsapp_2 || c.WA_text) ? 1 : 0,
+                email_count: (c.email_1 || c.email_2) ? 1 : 0,
+                "W.P_1": c.WA_text || c.whatsapp_1 || "Outreach WhatsApp Message",
+                "W.P_2": c.whatsapp_2 || "",
+                "1st_wa_ts": c.created_at || c.eworks_created_on,
+                total_job_count: c.total_job_count || 0,
+                total_invoiced_value: c.total_invoiced_value || 0,
+                category: c.latest_quoted_service_category || 'General Service',
+                _source_table: 'customers'
+            };
         });
+
+        // Filter into lists
+        const masterLeads = mappedLeads;
+        const nrWf = mappedLeads.filter(l => l.Phone || l.email);
+        const followup = mappedLeads.filter(l => checkIsReplied(l.WA_replied || l.WP_Replied_track) || l.total_job_count > 0);
+        const nurture = mappedLeads.filter(l => !checkIsReplied(l.WA_replied || l.WP_Replied_track) && l.total_job_count === 0);
+
+        function checkIsReplied(val: any): boolean {
+            if (!val) return false;
+            const str = String(val).trim().toLowerCase();
+            return str !== '' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
+        }
+
 
         return NextResponse.json({
             nr_wf: nrWf,
             followup: followup,
             nurture: nurture,
             master_leads: masterLeads,
-            activity_leads: activityLeads,
+            activity_leads: [],
         }, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });
@@ -115,3 +106,4 @@ export async function GET(request: NextRequest) {
         );
     }
 }
+

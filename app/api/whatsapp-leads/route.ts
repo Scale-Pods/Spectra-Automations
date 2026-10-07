@@ -3,16 +3,12 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-const ACTIVITY_TABLES = ['fello_activity', 'aspen_activity', 'naples_activity', 'old_activity'] as const;
-const LEAD_TABLES = ['fello_leads', 'naples_leads', 'aspen_leads', 'master_leads'] as const;
-
 function parseWADateToISO(raw: any): string | null {
     if (!raw) return null;
     if (typeof raw === 'number') return new Date(raw).toISOString();
     const s = String(raw).trim();
     if (!s) return null;
 
-    // Check for DD/MM/YYYY HH:mm or DD/MM/YYYY HH:mm:ss or DD/MM/YYYY
     const ddmmyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
     if (ddmmyyyy) {
         const day = ddmmyyyy[1].padStart(2, '0');
@@ -34,111 +30,77 @@ export async function GET(request: NextRequest) {
         const from = searchParams.get('from');
         const to = searchParams.get('to');
 
-        const fromDate = from || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-        const toDate = to || new Date().toISOString();
+        // Fetch WhatsApp-eligible customers
+        const { data: customerRows } = await supabaseAdmin
+            .from('customers')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-        let nr_wf: any[] = [];
-        let followup: any[] = [];
-        let nurture: any[] = [];
-        let owners: any[] = [];
+        const customers = customerRows || [];
 
-        // Try RPC first
-        let rpcSuccess = false;
-        try {
-            const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_wa_leads_list', {
-                p_from: fromDate,
-                p_to: toDate,
-            });
-            if (!rpcError && rpcData) {
-                nr_wf = rpcData.nr_wf || [];
-                followup = rpcData.followup || [];
-                nurture = rpcData.nurture || [];
-                owners = rpcData.owners || [];
-                rpcSuccess = true;
-            }
-        } catch {
-            // RPC failed
+        const nr_wf: any[] = [];
+        const followup: any[] = [];
+        const nurture: any[] = [];
+        const owners: any[] = [];
+
+        function checkIsReplied(val: any): boolean {
+            if (!val) return false;
+            const str = String(val).trim().toLowerCase();
+            return str !== '' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
         }
 
-        // If RPC failed or returned no lead data, query lead tables directly
-        if (!rpcSuccess || (nr_wf.length === 0 && followup.length === 0 && nurture.length === 0)) {
-            for (const table of LEAD_TABLES) {
-                try {
-                    const { data, error } = await supabaseAdmin
-                        .from(table)
-                        .select('*');
+        customers.forEach((row: any) => {
+            const phone = row.phone_e164 || row.mobile_raw || row.telephone_raw || '';
+            const name = row.full_name || row.customer_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'WhatsApp Lead';
+            const isWpReplied = checkIsReplied(row.WA_replied);
+            const createdIso = row.created_at || row.eworks_created_on || new Date().toISOString();
 
-                    if (!error && data && data.length > 0) {
-                        data.forEach((row: any) => {
-                            const waCnt = Number(row.whatsapp_count || 0);
-                            const firstWa = row['1st_wa_ts'] || row.whatsapp_ts || row.last_whatsapp_at;
-                            const hasWA = waCnt > 0 || !!firstWa;
+            const hasWaMsg = !!(row.WA_text || row.whatsapp_1 || row.whatsapp_2 || row.whatsapp_3 || row.whatsapp_4);
+            const leadObj = {
+                ...row, // Preserve ALL database row properties (WA_text, WA_sentiment, WA_note, quotes, jobs, etc.)
+                _source_table: 'customers',
+                id: row.id,
+                Name: name,
+                name: name,
+                full_name: name,
+                Phone: phone,
+                phone: phone,
+                phone_e164: phone,
+                Email: row.email || '',
+                email: row.email || '',
+                city: row.city || 'Dubai',
+                "W.P_1": row.WA_text || row.whatsapp_1 || "",
+                "W.P_2": row.whatsapp_2 || "",
+                "W.P_3": row.whatsapp_3 || "",
+                "1st_wa_ts": hasWaMsg ? createdIso : null,
+                wp1_parsed_date: hasWaMsg ? createdIso : null,
+                WP_Replied_track: isWpReplied ? (row.WA_replied || "Replied") : "",
+                replied: isWpReplied ? (row.WA_replied || "yes") : "no",
+                whatsapp_replied: isWpReplied ? (row.WA_replied || "yes") : "",
+                whatsapp_count: hasWaMsg ? 1 : 0,
+                sequence_channel: row.sequence_channel || 'WHATSAPP',
+                sequence_step: row.sequence_step || 1,
+                total_job_count: row.total_job_count || 0,
+                total_invoiced_value: row.total_invoiced_value || 0,
+                category: row.latest_quoted_service_category || 'General Service',
+            };
 
-                            if (hasWA) {
-                                const dateRaw = firstWa || row.created_at;
-                                const parsedISO = parseWADateToISO(dateRaw);
-                                const hasWpReplyContent = !!(row.WP_Replied_track || row.whatsapp_replied || row["W.P_Replied 1"] || row["W.P_Replied_1"]);
-                                const isWpReplied = hasWpReplyContent && row.replied && String(row.replied).trim() !== '' && String(row.replied).toLowerCase() !== 'no' && String(row.replied).toLowerCase() !== 'false';
-
-                                const wp1MessageText = row["W.P_1"] || row.stage_data?.["WhatsApp 1"] || "Outreach WhatsApp Message";
-
-                                nr_wf.push({
-                                    ...row,
-                                    _source_table: table,
-                                    "Name": row.name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Lead',
-                                    "Phone": row.phone || row.customer_phone || '',
-                                    "W.P_1": wp1MessageText,
-                                    "1st_wa_ts": dateRaw,
-                                    wp1_parsed_date: parsedISO || row.created_at,
-                                    "WP_Replied_track": isWpReplied ? (row.WP_Replied_track || "Replied") : "",
-                                    whatsapp_count: waCnt > 0 ? waCnt : 1,
-                                });
-                            }
-                        });
-                    }
-                } catch {
-                    // skip table if missing
-                }
+            if (isWpReplied || row.total_job_count > 0) {
+                followup.push(leadObj);
+            } else if (hasWaMsg) {
+                nr_wf.push(leadObj);
+            } else {
+                nurture.push(leadObj);
             }
-        }
-
-        // Fetch WhatsApp activity data from all activity tables
-        const waActivity: any[] = [];
-        for (const table of ACTIVITY_TABLES) {
-            try {
-                const { data, error } = await supabaseAdmin
-                    .from(table)
-                    .select('*')
-                    .ilike('channel', 'WhatsApp')
-                    .gte('created_at', fromDate)
-                    .lte('created_at', toDate)
-                    .order('created_at', { ascending: false })
-                    .limit(2000);
-
-                if (!error && data && data.length > 0) {
-                    waActivity.push(...data.map((row: any) => ({
-                        ...row,
-                        _source_table: table,
-                        wp1_parsed_date: parseWADateToISO(row.created_at || row.started_at) || row.created_at,
-                    })));
-                }
-            } catch {
-                // skip tables that don't exist
-            }
-        }
-
-        waActivity.sort((a, b) => {
-            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-            return db - da;
         });
 
+
         return NextResponse.json({
-            nr_wf,
+            nr_wf: nr_wf.length > 0 ? nr_wf : (followup.length > 0 ? followup : nurture),
             followup,
             nurture,
             owners,
-            wa_activity: waActivity,
+            wa_activity: [],
         }, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });
