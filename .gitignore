@@ -41,3 +41,8 @@ Thumbs.db
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Scratch files and temporary scripts
+scratch/
+scratch_*
+*.scratch.*
