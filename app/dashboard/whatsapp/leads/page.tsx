@@ -192,6 +192,10 @@ export default function WhatsappLeadsPage() {
     const filteredLeads = useMemo(() => {
         setCurrentPage(1);
         return waLeads.filter(lead => {
+            // Strictly require non-empty value in WA_text column
+            const waText = lead.WA_text || lead["WA_text"] || lead["W.P_1"] || lead["whatsapp_1"];
+            if (!waText || !String(waText).trim()) return false;
+
             const name = String(lead["Name"] || "").toLowerCase();
             const phone = String(lead["Phone"] || "");
             const email = String(lead["Email"] || "").toLowerCase();
@@ -280,9 +284,9 @@ export default function WhatsappLeadsPage() {
                 <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className={`gap-2 h-10 border-[var(--separator)] ${activeFilters.replyStatus.length > 0 ? 'bg-[rgba(52,199,89,0.08)] border-emerald-200 text-emerald-700' : ''}`}>
-                                <Filter className="h-4 w-4" />
-                                {activeFilters.replyStatus.length > 0 ? `Status (${activeFilters.replyStatus.length})` : 'Status'}
+                            <Button variant="outline" className={`gap-2 h-10 border-[var(--separator)] text-[var(--label-primary)] font-medium ${activeFilters.replyStatus.length > 0 ? 'bg-[rgba(52,199,89,0.08)] border-emerald-200 text-emerald-700' : ''}`}>
+                                <Filter className="h-4 w-4 text-[var(--label-secondary)]" />
+                                <span>{activeFilters.replyStatus.length > 0 ? `Status (${activeFilters.replyStatus.length})` : 'Status'}</span>
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
@@ -295,8 +299,10 @@ export default function WhatsappLeadsPage() {
                         </DropdownMenuContent>
                     </DropdownMenu>
 
-                    <Button variant="outline" className="gap-2 h-10 border-[var(--separator)]" onClick={() => {}}>
-                        <RefreshCw className="h-4 w-4" /> Refresh
+                    <Button variant="outline" className="gap-2 h-10 border-[var(--separator)] text-[var(--label-primary)] font-medium" onClick={() => {
+                        if (dateRange?.from) fetchWaLeads(dateRange.from, dateRange.to || dateRange.from);
+                    }}>
+                        <RefreshCw className="h-4 w-4 text-[var(--label-secondary)]" /> <span>Refresh</span>
                     </Button>
                 </div>
             </div>

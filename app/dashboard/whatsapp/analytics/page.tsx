@@ -108,21 +108,23 @@ export default function WhatsappAnalyticsPage() {
             return isNaN(d.getTime()) ? null : d;
         };
 
-        const nr_wf = (loopData.nr_wf || []).map(l => ({ ...l, source_loop: "Intro" }));
-        const followup = (loopData.followup || []).map(l => ({ ...l, source_loop: "Follow Up" }));
-        const nurture = (loopData.nurture || []).map(l => ({ ...l, source_loop: "Nurture" }));
-        const waActivity = (loopData.wa_activity || []).map(a => ({
-            ...a,
-            source_loop: "Activity",
-            "Name": a.lead_name || a.name || "",
-            "Phone": a.lead_phone || a.phone || "",
-            "W.P_1": a.created_at || true,
-            wp1_parsed_date: a.created_at,
-            "WP_Replied_track": (a.replied_at || a.status === "completed" || a.status === "replied" || a.replied) ? "Replied" : "",
-            status: a.status || (a.replied_at ? "replied" : "sent"),
-        }));
+        const nr_wf = loopData.nr_wf || [];
+        const followup = loopData.followup || [];
+        const nurture = loopData.nurture || [];
+        const waActivity = loopData.wa_activity || [];
 
-        const mergedLeads = [...nr_wf, ...followup, ...nurture, ...waActivity];
+        // Deduplicate leads by unique phone / ID
+        const leadMap = new Map<string, any>();
+        [...nr_wf, ...followup, ...nurture, ...waActivity].forEach(l => {
+            const rawPhone = l.phone_e164 || l.phone || l.Phone || l.mobile_raw || '';
+            const cleanPhone = String(rawPhone).replace(/\D/g, '');
+            const key = cleanPhone || String(l.id || l.Name || l.name || '').trim();
+            if (key && !leadMap.has(key)) {
+                leadMap.set(key, l);
+            }
+        });
+
+        const mergedLeads = Array.from(leadMap.values());
 
         const from = dateRange?.from ? startOfDay(dateRange.from).getTime() : null;
         const to = endOfDay(dateRange?.to || dateRange?.from || new Date()).getTime();
@@ -133,84 +135,68 @@ export default function WhatsappAnalyticsPage() {
 
         const dailyMap: Record<string, { reachouts: number; replies: number }> = {};
         const statusCounts = { sent: 0, delivered: 0, read: 0, replied: 0, failed: 0 };
-
-        const inRangeLeads = mergedLeads.filter(lead => {
-            const dateSource = lead.wp1_parsed_date || lead.created_at || lead["Created At"] || lead['1st_wa_ts'];
-            if (!dateSource) return true;
-            const parsed = parseDate(dateSource);
-            if (!parsed) return true;
-            return inRange(parsed.getTime());
-        });
-
         const uniqueLeads = new Set<string>();
-        inRangeLeads.forEach(lead => {
-            const phone = String(lead.Phone || lead.phone || lead.lead_phone || lead.customer_phone || '').replace(/\D/g, '');
-            const key = phone || String(lead.Name || lead.lead_name || lead.name || lead.id || '').trim();
-            if (key) uniqueLeads.add(key);
-        });
-        const uniqueSentCount = uniqueLeads.size;
 
-        inRangeLeads.forEach(lead => {
-            // Sent count calculation
-            if (lead.source_loop === "Activity") {
-                if (lead.content) {
-                    const lines = String(lead.content).split('\n');
-                    let found = 0;
-                    for (const line of lines) {
-                        const trimmed = line.trim();
-                        if (trimmed.startsWith('Template:') || trimmed.startsWith('User:') || trimmed.startsWith('Agent:') || trimmed.startsWith('Agent :')) {
-                            found++;
-                        }
-                    }
-                    sentCount += Math.max(1, found);
-                } else {
-                    sentCount++;
-                }
-            } else {
-                const waCnt = Number(lead.whatsapp_count || 0);
-                if (waCnt > 0) {
-                    sentCount += waCnt;
-                } else {
-                    let cnt = 0;
-                    for (let i = 1; i <= 12; i++) {
-                        if (lead[`W.P_${i}`]) cnt++;
-                    }
-                    if (lead["W.P_FollowUp"]) cnt++;
-                    sentCount += Math.max(1, cnt);
-                }
-            }
-
-            // Replies
-            const hasReplied = (() => {
-                if (lead.source_loop === "Activity") {
-                    return !!(lead.replied_at || lead.status === "completed" || lead.status === "replied" || lead.replied);
-                }
-                const wp = lead.WP_Replied_track || lead["WP_Replied_track"] || lead.replied;
-                return !!(wp && String(wp).trim() && String(wp).trim().toLowerCase() !== "no" && String(wp).trim().toLowerCase() !== "false" && String(wp).trim().toLowerCase() !== "none");
-            })();
-
-            if (hasReplied) totalReplies++;
-
-            // Status distribution
-            const stVal = String(lead.status || (hasReplied ? "replied" : "sent")).trim().toLowerCase();
-            if (stVal.includes('read')) statusCounts.read++;
-            else if (stVal.includes('delivered')) statusCounts.delivered++;
-            else if (stVal.includes('replied')) statusCounts.replied++;
-            else if (stVal.includes('failed') || stVal.includes('error')) statusCounts.failed++;
-            else statusCounts.sent++;
-
-            // Trend
+        mergedLeads.forEach(lead => {
             const dateSource = lead.wp1_parsed_date || lead.created_at || lead["Created At"] || lead['1st_wa_ts'];
             if (dateSource) {
                 const parsed = parseDate(dateSource);
-                if (parsed) {
-                    const dayKey = parsed.toISOString().slice(0, 10);
-                    if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
-                    dailyMap[dayKey].reachouts++;
-                    if (hasReplied) dailyMap[dayKey].replies++;
+                if (parsed && !inRange(parsed.getTime())) return;
+            }
+
+            const rawPhone = lead.phone_e164 || lead.phone || lead.Phone || lead.mobile_raw || '';
+            const cleanPhone = String(rawPhone).replace(/\D/g, '');
+            const key = cleanPhone || String(lead.id || lead.Name || lead.name || '').trim();
+
+            const text1 = lead.whatsapp_1 ? String(lead.whatsapp_1).trim() : '';
+            const text2 = lead.whatsapp_2 ? String(lead.whatsapp_2).trim() : '';
+            const text3 = lead.whatsapp_3 ? String(lead.whatsapp_3).trim() : '';
+            const text4 = lead.whatsapp_4 ? String(lead.whatsapp_4).trim() : '';
+            const waText = lead.WA_text ? String(lead.WA_text).trim() : '';
+
+            const hasWaText = waText !== '' || text1 !== '' || text2 !== '' || text3 !== '' || text4 !== '';
+
+            const rVal = lead.WA_replied || lead.WP_Replied_track || lead.whatsapp_replied || lead.replied;
+            const hasReplied = !!(rVal && String(rVal).trim() && !["no", "none", "0", "false", "null"].includes(String(rVal).trim().toLowerCase()));
+
+            if (hasWaText || hasReplied) {
+                if (key) uniqueLeads.add(key);
+
+                let msgCount = 0;
+                if (waText) {
+                    const turns = waText.match(/(User|AI|Agent|Bot|Template)\s*(?:\[[^\]]+\])?\s*:/gi);
+                    msgCount = turns ? turns.length : 1;
+                } else {
+                    if (text1) msgCount++;
+                    if (text2) msgCount++;
+                    if (text3) msgCount++;
+                    if (text4) msgCount++;
+                }
+
+                sentCount += Math.max(1, msgCount);
+
+                if (hasReplied) totalReplies++;
+
+                const stVal = String(lead.WA_status || lead.status || (hasReplied ? "replied" : "sent")).trim().toLowerCase();
+                if (stVal.includes('read')) statusCounts.read++;
+                else if (stVal.includes('delivered')) statusCounts.delivered++;
+                else if (stVal.includes('replied')) statusCounts.replied++;
+                else if (stVal.includes('failed') || stVal.includes('error')) statusCounts.failed++;
+                else statusCounts.sent++;
+
+                if (dateSource) {
+                    const parsed = parseDate(dateSource);
+                    if (parsed) {
+                        const dayKey = parsed.toISOString().slice(0, 10);
+                        if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
+                        dailyMap[dayKey].reachouts += Math.max(1, msgCount);
+                        if (hasReplied) dailyMap[dayKey].replies++;
+                    }
                 }
             }
         });
+
+        const uniqueSentCount = uniqueLeads.size;
 
         const trendData = Object.entries(dailyMap)
             .sort(([a], [b]) => a.localeCompare(b))

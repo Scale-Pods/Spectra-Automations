@@ -55,9 +55,21 @@ export async function GET(request: NextRequest) {
             const isWpReplied = checkIsReplied(row.WA_replied);
             const createdIso = row.created_at || row.eworks_created_on || new Date().toISOString();
 
-            const hasWaMsg = !!(row.WA_text || row.whatsapp_1 || row.whatsapp_2 || row.whatsapp_3 || row.whatsapp_4);
+            const hasWaMsg = !!(
+                (row.WA_text && String(row.WA_text).trim()) ||
+                (row.whatsapp_1 && String(row.whatsapp_1).trim()) ||
+                (row.whatsapp_2 && String(row.whatsapp_2).trim()) ||
+                (row.whatsapp_3 && String(row.whatsapp_3).trim()) ||
+                (row.whatsapp_4 && String(row.whatsapp_4).trim())
+            );
+
+            // Filter out leads with no WhatsApp activity or sequence
+            if (!hasWaMsg && !isWpReplied && String(row.sequence_channel || '').toLowerCase() !== 'whatsapp') {
+                return;
+            }
+
             const leadObj = {
-                ...row, // Preserve ALL database row properties (WA_text, WA_sentiment, WA_note, quotes, jobs, etc.)
+                ...row,
                 _source_table: 'customers',
                 id: row.id,
                 Name: name,
@@ -85,7 +97,7 @@ export async function GET(request: NextRequest) {
                 category: row.latest_quoted_service_category || 'General Service',
             };
 
-            if (isWpReplied || row.total_job_count > 0) {
+            if (isWpReplied) {
                 followup.push(leadObj);
             } else if (hasWaMsg) {
                 nr_wf.push(leadObj);
@@ -94,9 +106,8 @@ export async function GET(request: NextRequest) {
             }
         });
 
-
         return NextResponse.json({
-            nr_wf: nr_wf.length > 0 ? nr_wf : (followup.length > 0 ? followup : nurture),
+            nr_wf,
             followup,
             nurture,
             owners,

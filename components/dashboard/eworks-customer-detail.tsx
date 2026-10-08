@@ -258,22 +258,36 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {customer.active_jobs.map((job) => (
-                                        <div key={job.id} className="bg-amber-50/60 border border-amber-200 p-3.5 rounded-xl flex justify-between items-center">
-                                            <div>
-                                                <h4 className="font-bold text-slate-900 text-sm">{job.title}</h4>
-                                                <p className="text-xs text-slate-600 mt-0.5 font-medium">
-                                                    Type: {job.type} • Scheduled: {job.scheduled_date}
-                                                </p>
+                                    {customer.active_jobs.map((job: any, idx: number) => {
+                                        const jobTitle = job.title || job.short_description || job.description || customer.latest_job_short_description || `Active Job #${job.id || idx + 1}`;
+                                        const jobType = job.type || job.job_type || customer.latest_quoted_service_category || "General Service";
+                                        const rawDate = job.scheduled_date || job.start_date || job.job_start_date;
+                                        const jobDate = rawDate ? formatDate(rawDate) : (customer.latest_job_start_date ? formatDate(customer.latest_job_start_date) : "Scheduled");
+                                        const statusText = job.status_text || job.status_name || (typeof job.status === 'number' ? (job.status === 2 ? 'Scheduled' : job.status === 3 ? 'In Progress' : job.status === 1 ? 'Pending' : `Status ${job.status}`) : job.status) || customer.latest_job_status_text || "Scheduled";
+                                        const rawJobAmount = job.amount ?? job.total ?? job.value ?? job.price ?? job.total_amount;
+                                        const hasJobAmount = rawJobAmount !== undefined && rawJobAmount !== null && !isNaN(Number(rawJobAmount)) && Number(rawJobAmount) > 0;
+
+                                        return (
+                                            <div key={job.id ? `job-${job.id}-${idx}` : `job-${idx}`} className="bg-amber-50/60 border border-amber-200 p-3.5 rounded-xl flex justify-between items-center">
+                                                <div>
+                                                    <h4 className="font-bold text-slate-900 text-sm">{jobTitle}</h4>
+                                                    <p className="text-xs text-slate-600 mt-0.5 font-medium">
+                                                        Type: {jobType} • Scheduled: {jobDate}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <Badge className="bg-amber-100 text-amber-800 border-amber-300 font-semibold">
+                                                        {statusText}
+                                                    </Badge>
+                                                    {hasJobAmount ? (
+                                                        <p className="text-sm font-extrabold text-slate-900 mt-1">
+                                                            {formatCurrency(Number(rawJobAmount))}
+                                                        </p>
+                                                    ) : null}
+                                                </div>
                                             </div>
-                                            <div className="text-right">
-                                                <Badge className="bg-amber-100 text-amber-800 border-amber-300 font-semibold">
-                                                    {job.status}
-                                                </Badge>
-                                                <p className="text-sm font-extrabold text-slate-900 mt-1">{formatCurrency(job.amount)}</p>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </CardContent>
                             </Card>
                         )}
@@ -532,8 +546,8 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                     <CardTitle className="text-sm font-bold text-violet-700">Historical Service Log</CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-2">
-                                    {customer.service_history.map((srv) => (
-                                        <div key={srv.id} className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-xl flex justify-between items-center text-sm">
+                                    {customer.service_history.map((srv, idx) => (
+                                        <div key={srv.id ? `srv-${srv.id}-${idx}` : `srv-${idx}`} className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-xl flex justify-between items-center text-sm">
                                             <div>
                                                 <h5 className="font-bold text-slate-900">{srv.service_name}</h5>
                                                 <p className="text-xs text-slate-500 mt-0.5 font-medium">
