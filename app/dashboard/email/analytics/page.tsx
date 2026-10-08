@@ -306,7 +306,7 @@ export default function EmailAnalyticsPage() {
                 </Card>
             </div>
 
-            {loading && <LMLoader fullScreen={false} />}
+            {loading && <LMLoader />}
         </div>
     );
 }

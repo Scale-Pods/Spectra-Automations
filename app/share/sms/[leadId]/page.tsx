@@ -109,7 +109,7 @@ export default function PublicSMSSharePage({ params }: { params: Promise<{ leadI
             const isEmail = decodedLeadId.includes('@');
             const query = isEmail
                 ? `channel=sms&email=${encodeURIComponent(decodedLeadId)}`
-                : `channel=sms&phone=${encodeURIComponent(decodedLeadId)}`;
+                : `channel=sms&id=${encodeURIComponent(decodedLeadId)}`;
 
             try {
                 const res = await fetch(`/api/public/share?${query}`, {
@@ -183,8 +183,8 @@ export default function PublicSMSSharePage({ params }: { params: Promise<{ leadI
                             {String(lead.name || lead.phone || '?').charAt(0).toUpperCase()}
                         </div>
                         <div>
-                            <p className="font-bold text-white">{lead.name || 'Unknown Contact'}</p>
-                            <p className="text-xs text-slate-400">{lead.phone} {lead.email ? `• ${lead.email}` : ''} {lead.campaign ? `• ${lead.campaign}` : ''}</p>
+                            <p className="font-bold text-slate-800">{lead.name || 'Unknown Contact'} {lead.eworks_customer_id ? `(#${lead.eworks_customer_id})` : ''}</p>
+                            <p className="text-xs text-slate-600 font-mono">{lead.phone} {lead.email ? `• ${lead.email}` : ''} {lead.category ? `• ${lead.category}` : ''} {lead.total_invoiced_value > 0 ? `• AED ${Number(lead.total_invoiced_value).toLocaleString()}` : ''}</p>
                         </div>
                         <div className="ml-auto text-right">
                             <p className="text-[10px] font-bold uppercase text-slate-500">Messages</p>

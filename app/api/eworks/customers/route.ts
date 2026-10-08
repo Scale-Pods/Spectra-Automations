@@ -41,6 +41,17 @@ export async function GET(request: NextRequest) {
         // Service Category breakdown counters
         const serviceCategoryMap: Record<string, { count: number; revenue: number }> = {};
 
+        // Highlight insight counters
+        let highestUnpaidCustomer = { name: 'N/A', id: 'N/A', amount: 0 };
+        let largestInvoiceCustomer = { name: 'N/A', id: 'N/A', amount: 0 };
+        let highestJobVolumeCustomer = { name: 'N/A', id: 'N/A', count: 0 };
+        let oldestJobRecord = { name: 'N/A', date: 'N/A', title: 'N/A' };
+
+        let maxUnpaid = -1;
+        let maxInvoiced = -1;
+        let maxJobs = -1;
+        let earliestDate: Date | null = null;
+
         customers.forEach(c => {
             totalInvoiced += Number(c.total_invoiced_value || 0);
             totalReceived += Number(c.total_received_value || 0);
@@ -62,6 +73,46 @@ export async function GET(request: NextRequest) {
             }
             serviceCategoryMap[cat].count += Number(c.total_job_count || 1);
             serviceCategoryMap[cat].revenue += Number(c.total_invoiced_value || 0);
+
+            const name = c.full_name || c.customer_name || `Customer #${c.eworks_customer_id || c.id}`;
+            const custId = c.eworks_customer_id ? `ID #${c.eworks_customer_id}` : `ID #${c.id}`;
+
+            // Highest Unpaid Balance
+            const unpaid = Number(c.total_outstanding_balance || 0);
+            if (unpaid > maxUnpaid) {
+                maxUnpaid = unpaid;
+                highestUnpaidCustomer = { name, id: custId, amount: unpaid };
+            }
+
+            // Largest Invoiced Value
+            const invoiced = Number(c.total_invoiced_value || 0);
+            if (invoiced > maxInvoiced) {
+                maxInvoiced = invoiced;
+                largestInvoiceCustomer = { name, id: custId, amount: invoiced };
+            }
+
+            // Highest Job Volume
+            const jobCount = Number(c.total_job_count || 0);
+            if (jobCount > maxJobs) {
+                maxJobs = jobCount;
+                highestJobVolumeCustomer = { name, id: custId, count: jobCount };
+            }
+
+            // Oldest Job Created / Record
+            const jobDateRaw = c.latest_job_start_date || c.eworks_created_on || c.created_at;
+            if (jobDateRaw) {
+                const d = new Date(jobDateRaw);
+                if (!isNaN(d.getTime())) {
+                    if (!earliestDate || d.getTime() < earliestDate.getTime()) {
+                        earliestDate = d;
+                        oldestJobRecord = {
+                            name,
+                            date: d.toISOString(),
+                            title: c.latest_quoted_service_category || 'Service Job'
+                        };
+                    }
+                }
+            }
         });
 
         // Format service categories array for pie charts
@@ -188,7 +239,13 @@ export async function GET(request: NextRequest) {
                 retentionReady,
                 unpaidInvoices,
                 overdueInvoices,
-                serviceCategories
+                serviceCategories,
+                highlights: {
+                    highestUnpaidCustomer,
+                    largestInvoiceCustomer,
+                    highestJobVolumeCustomer,
+                    oldestJobRecord
+                }
             },
             filterCounts
         });

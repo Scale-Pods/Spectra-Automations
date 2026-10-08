@@ -7,8 +7,7 @@ import {
     MessageCircle,
     TrendingUp,
     BarChart3,
-    Send,
-    Activity
+    Send
 } from "lucide-react";
 import {
     PieChart,
@@ -51,29 +50,110 @@ export default function WhatsappDashboardPage() {
         const fromISO = startOfDay(from).toISOString();
         const toISO = endOfDay(to).toISOString();
         try {
-            const metricsRes = await fetch(`/api/metrics/whatsapp?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
+            const res = await fetch(`/api/whatsapp-leads?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
+            if (!res.ok) throw new Error('Failed to fetch whatsapp leads');
+            const loopData = await res.json();
 
-            let uniqueSentCount = 0;
+            const parseDate = (raw: any): Date | null => {
+                if (!raw) return null;
+                if (typeof raw === 'number') return new Date(raw);
+                const s = String(raw).trim();
+                if (!s) return null;
+                const ddmmyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+                if (ddmmyyyy) {
+                    const day = ddmmyyyy[1].padStart(2, '0');
+                    const month = ddmmyyyy[2].padStart(2, '0');
+                    const year = ddmmyyyy[3];
+                    const hh = (ddmmyyyy[4] || '00').padStart(2, '0');
+                    const mm = (ddmmyyyy[5] || '00').padStart(2, '0');
+                    const ss = (ddmmyyyy[6] || '00').padStart(2, '0');
+                    const d = new Date(`${year}-${month}-${day}T${hh}:${mm}:${ss}.000Z`);
+                    if (!isNaN(d.getTime())) return d;
+                }
+                const d = new Date(s);
+                return isNaN(d.getTime()) ? null : d;
+            };
+
+            const nr_wf = loopData.nr_wf || [];
+            const followup = loopData.followup || [];
+            const nurture = loopData.nurture || [];
+            const waActivity = loopData.wa_activity || [];
+
+            // Deduplicate leads by unique phone / ID
+            const leadMap = new Map<string, any>();
+            [...nr_wf, ...followup, ...nurture, ...waActivity].forEach(l => {
+                const rawPhone = l.phone_e164 || l.phone || l.Phone || l.mobile_raw || '';
+                const cleanPhone = String(rawPhone).replace(/\D/g, '');
+                const key = cleanPhone || String(l.id || l.Name || l.name || '').trim();
+                if (key && !leadMap.has(key)) {
+                    leadMap.set(key, l);
+                }
+            });
+
+            const mergedLeads = Array.from(leadMap.values());
+
+            const fromTime = startOfDay(from).getTime();
+            const toTime = endOfDay(to).getTime();
+            const inRange = (t: number) => t >= fromTime && t <= toTime;
+
             let sentCount = 0;
             let totalReplies = 0;
-            let activityReachouts = 0;
-            let activityReplies = 0;
-            let dailyMap: Record<string, { sent: number; replied: number }> = {};
+            const dailyMap: Record<string, { sent: number; replied: number }> = {};
+            const uniqueLeads = new Set<string>();
 
-            if (metricsRes.ok) {
-                const m = await metricsRes.json();
-                activityReachouts = m.totalReachouts || 0;
-                activityReplies = m.totalReplies || 0;
-                uniqueSentCount = m.totalReachouts || 0;
-                sentCount = m.totalReachouts || 0;
-                totalReplies = m.totalReplies || 0;
-                if (m.dailyTrend && m.dailyTrend.length > 0) {
-                    m.dailyTrend.forEach((d: any) => {
-                        const dateKey = d.date;
-                        dailyMap[dateKey] = { sent: d.reachouts || 0, replied: d.replies || 0 };
-                    });
+            mergedLeads.forEach(lead => {
+                const dateSource = lead.wp1_parsed_date || lead.created_at || lead["Created At"] || lead['1st_wa_ts'];
+                if (dateSource) {
+                    const parsed = parseDate(dateSource);
+                    if (parsed && !inRange(parsed.getTime())) return;
                 }
-            }
+
+                const rawPhone = lead.phone_e164 || lead.phone || lead.Phone || lead.mobile_raw || '';
+                const cleanPhone = String(rawPhone).replace(/\D/g, '');
+                const key = cleanPhone || String(lead.id || lead.Name || lead.name || '').trim();
+
+                const text1 = lead.whatsapp_1 ? String(lead.whatsapp_1).trim() : '';
+                const text2 = lead.whatsapp_2 ? String(lead.whatsapp_2).trim() : '';
+                const text3 = lead.whatsapp_3 ? String(lead.whatsapp_3).trim() : '';
+                const text4 = lead.whatsapp_4 ? String(lead.whatsapp_4).trim() : '';
+                const waText = lead.WA_text ? String(lead.WA_text).trim() : '';
+
+                const hasWaText = waText !== '' || text1 !== '' || text2 !== '' || text3 !== '' || text4 !== '';
+
+                const rVal = lead.WA_replied || lead.WP_Replied_track || lead.whatsapp_replied || lead.replied;
+                const hasReplied = !!(rVal && String(rVal).trim() && !["no", "none", "0", "false", "null"].includes(String(rVal).trim().toLowerCase()));
+
+                if (hasWaText || hasReplied) {
+                    if (key) uniqueLeads.add(key);
+
+                    let msgCount = 0;
+                    if (waText) {
+                        const turns = waText.match(/(User|AI|Agent|Bot|Template)\s*(?:\[[^\]]+\])?\s*:/gi);
+                        msgCount = turns ? turns.length : 1;
+                    } else {
+                        if (text1) msgCount++;
+                        if (text2) msgCount++;
+                        if (text3) msgCount++;
+                        if (text4) msgCount++;
+                    }
+
+                    sentCount += Math.max(1, msgCount);
+
+                    if (hasReplied) totalReplies++;
+
+                    if (dateSource) {
+                        const parsed = parseDate(dateSource);
+                        if (parsed) {
+                            const dayKey = parsed.toISOString().slice(0, 10);
+                            if (!dailyMap[dayKey]) dailyMap[dayKey] = { sent: 0, replied: 0 };
+                            dailyMap[dayKey].sent += Math.max(1, msgCount);
+                            if (hasReplied) dailyMap[dayKey].replied++;
+                        }
+                    }
+                }
+            });
+
+            const uniqueSentCount = uniqueLeads.size;
 
             const trendData = Object.entries(dailyMap)
                 .sort(([a], [b]) => a.localeCompare(b))
@@ -87,8 +167,8 @@ export default function WhatsappDashboardPage() {
                 uniqueSentCount,
                 sentCount,
                 totalReplies,
-                activityReachouts,
-                activityReplies,
+                activityReachouts: sentCount,
+                activityReplies: totalReplies,
                 trendData,
             });
         } catch (err) {
@@ -115,13 +195,13 @@ export default function WhatsappDashboardPage() {
     };
 
     const donutData = [
-        { name: 'Unique Msg Sent', value: stats.uniqueSentCount, color: '#8b5cf6' },
-        { name: 'Messages Sent', value: stats.sentCount, color: '#3b82f6' },
+        { name: 'Unique Leads Contacted', value: stats.uniqueSentCount, color: '#8b5cf6' },
         { name: 'Total Replies', value: stats.totalReplies, color: '#10b981' },
+        { name: 'Messages Sent', value: stats.sentCount, color: '#3b82f6' },
     ];
 
     return (
-        <div className="space-y-3 pb-3 relative min-h-[500px]">
+        <div className="space-y-4 pb-3 relative min-h-[500px]">
             {loading && <LMLoader />}
 
             {/* Header */}
@@ -134,9 +214,9 @@ export default function WhatsappDashboardPage() {
             </div>
 
             {/* Metric Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <MetricCard
-                    title="Unique Msg Sent"
+                    title="Unique Leads Contacted"
                     value={loading ? "..." : stats.uniqueSentCount.toLocaleString()}
                     icon={Users}
                     theme="purple"
@@ -153,18 +233,6 @@ export default function WhatsappDashboardPage() {
                     value={loading ? "..." : stats.sentCount.toLocaleString()}
                     icon={Send}
                     theme="blue"
-                />
-                <MetricCard
-                    title="Activity Reachouts"
-                    value={loading ? "..." : stats.activityReachouts.toLocaleString()}
-                    icon={Activity}
-                    theme="amber"
-                />
-                <MetricCard
-                    title="Activity Replies"
-                    value={loading ? "..." : stats.activityReplies.toLocaleString()}
-                    icon={MessageCircle}
-                    theme="amber"
                 />
             </div>
 
@@ -199,7 +267,7 @@ export default function WhatsappDashboardPage() {
                             </ResponsiveContainer>
                         </div>
                         <div className="grid grid-cols-3 gap-4 mt-4">
-                            <SummaryPill label="Unique Msg Sent" value={loading ? "..." : stats.uniqueSentCount} color="bg-purple-600" />
+                            <SummaryPill label="Unique Leads Contacted" value={loading ? "..." : stats.uniqueSentCount} color="bg-purple-600" />
                             <SummaryPill label="Messages Sent" value={loading ? "..." : stats.sentCount} color="bg-blue-600" />
                             <SummaryPill label="Total Replies" value={loading ? "..." : stats.totalReplies} color="bg-emerald-600" />
                         </div>

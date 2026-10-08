@@ -113,10 +113,10 @@ export default function PublicEmailSharePage({ params }: { params: Promise<{ lea
             setError(null);
 
             // Determine search param: phone numbers go by phone, emails go by email
-            const isPhone = /^\+?\d[\d\s\-().]{4,}$/.test(decodedLeadId.replace(/\s/g, ''));
-            const query = isPhone
-                ? `channel=email&phone=${encodeURIComponent(decodedLeadId)}`
-                : `channel=email&email=${encodeURIComponent(decodedLeadId)}`;
+            const isEmail = decodedLeadId.includes('@');
+            const query = isEmail
+                ? `channel=email&email=${encodeURIComponent(decodedLeadId)}`
+                : `channel=email&id=${encodeURIComponent(decodedLeadId)}`;
 
             try {
                 const res = await fetch(`/api/public/share?${query}`, {
@@ -190,8 +190,8 @@ export default function PublicEmailSharePage({ params }: { params: Promise<{ lea
                             {String(lead.name || lead.email || '?').charAt(0).toUpperCase()}
                         </div>
                         <div>
-                            <p className="font-bold text-white">{lead.name || 'Unknown Contact'}</p>
-                            <p className="text-xs text-slate-400">{lead.email} {lead.phone ? `• ${lead.phone}` : ''} {lead.campaign ? `• ${lead.campaign}` : ''}</p>
+                            <p className="font-bold text-slate-800">{lead.name || 'Unknown Contact'} {lead.eworks_customer_id ? `(#${lead.eworks_customer_id})` : ''}</p>
+                            <p className="text-xs text-slate-600 font-mono">{lead.email} {lead.phone ? `• ${lead.phone}` : ''} {lead.category ? `• ${lead.category}` : ''} {lead.total_invoiced_value > 0 ? `• AED ${Number(lead.total_invoiced_value).toLocaleString()}` : ''}</p>
                         </div>
                         <div className="ml-auto text-right">
                             <p className="text-[10px] font-bold uppercase text-slate-500">Messages</p>

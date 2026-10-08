@@ -83,7 +83,13 @@ export default function EworksDashboardPage() {
         retentionReady: 0,
         unpaidInvoices: 0,
         overdueInvoices: 0,
-        serviceCategories: [] as Array<{ name: string; count: number; revenue: number; color: string }>
+        serviceCategories: [] as Array<{ name: string; count: number; revenue: number; color: string }>,
+        highlights: {
+            highestUnpaidCustomer: { name: 'N/A', id: 'N/A', amount: 0 },
+            largestInvoiceCustomer: { name: 'N/A', id: 'N/A', amount: 0 },
+            highestJobVolumeCustomer: { name: 'N/A', id: 'N/A', count: 0 },
+            oldestJobRecord: { name: 'N/A', date: 'N/A', title: 'N/A' }
+        }
     });
     const [filterCounts, setFilterCounts] = useState({
         all: 0,
@@ -290,8 +296,8 @@ export default function EworksDashboardPage() {
             {/* Graphs & Analytics Section */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Real Service Category Breakdown Donut Chart */}
-                <Card className="lg:col-span-1 bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-900 rounded-2xl">
-                    <CardHeader className="pb-2">
+                <Card className="lg:col-span-1 bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-900 rounded-2xl flex flex-col justify-between h-full">
+                    <CardHeader className="pb-2 border-b border-slate-100">
                         <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
                             <Layers className="h-4 w-4 text-violet-600" />
                             Live Service Categories
@@ -300,7 +306,7 @@ export default function EworksDashboardPage() {
                             Job volume breakdown across eWorks categories
                         </CardDescription>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="p-5 flex-1 flex flex-col justify-between">
                         <div className="h-[200px] w-full">
                             {metrics.serviceCategories.length === 0 ? (
                                 <div className="h-full flex items-center justify-center text-xs text-slate-400">Loading categories...</div>
@@ -351,54 +357,159 @@ export default function EworksDashboardPage() {
                     </CardContent>
                 </Card>
 
-                {/* Real Live Database Health & Summary Panel */}
-                <Card className="lg:col-span-2 bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-900 rounded-2xl">
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                            <Activity className="h-4 w-4 text-emerald-600" />
-                            Live eWorks Database Table Telemetry
-                        </CardTitle>
-                        <CardDescription className="text-slate-500 text-xs">
-                            Direct connection status to Supabase `public.customers` production table
-                        </CardDescription>
+                {/* Real Live Database Health & Highlights Telemetry Panel */}
+                <Card className="lg:col-span-2 bg-white/90 backdrop-blur-xl border border-slate-200/80 shadow-md text-slate-900 rounded-2xl flex flex-col justify-between h-full">
+                    <CardHeader className="pb-3 flex flex-row items-center justify-between border-b border-slate-100">
+                        <div>
+                            <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                                <Sparkles className="h-4 w-4 text-violet-600" />
+                                Live eWorks Telemetry Insights & Highlights
+                            </CardTitle>
+                            <CardDescription className="text-slate-500 text-xs">
+                                Live database analytics extracted from Supabase `public.customers` production table
+                            </CardDescription>
+                        </div>
+                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[11px] font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-1.5 inline-block" />
+                            Database Connected
+                        </Badge>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                                <span className="text-slate-500 font-medium block">Database Rows</span>
-                                <span className="text-lg font-extrabold text-slate-900 mt-0.5 block">{metrics.totalCustomers} Customers</span>
+                    <CardContent className="p-5 space-y-4 flex-1 flex flex-col justify-between">
+                        {/* Top Row: Financial & Historical Highlights */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
+                            {/* Person with Highest Unpaid Bill */}
+                            <div className="bg-red-50/60 border border-red-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-red-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <AlertTriangle className="h-3.5 w-3.5" /> Highest Unpaid Bill
+                                    </span>
+                                    <Badge className="bg-red-100 text-red-800 border-red-200 text-[10px] px-1.5 py-0">Alert</Badge>
+                                </div>
+                                <div className="my-auto">
+                                    <span className="text-xl font-extrabold text-red-900 block leading-tight">
+                                        {formatCurrency(metrics.highlights?.highestUnpaidCustomer?.amount)}
+                                    </span>
+                                    <span className="text-slate-800 font-bold block truncate mt-1 text-xs">
+                                        {metrics.highlights?.highestUnpaidCustomer?.name || 'N/A'}
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block border-t border-red-100 pt-1.5 mt-1">
+                                    {metrics.highlights?.highestUnpaidCustomer?.id || 'Customer Account'}
+                                </span>
                             </div>
-                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                                <span className="text-slate-500 font-medium block">Total Job Volume</span>
-                                <span className="text-lg font-extrabold text-violet-700 mt-0.5 block">{metrics.totalJobs.toLocaleString()} Jobs</span>
+
+                            {/* Largest Invoice */}
+                            <div className="bg-emerald-50/60 border border-emerald-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-emerald-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <Receipt className="h-3.5 w-3.5" /> Largest Invoiced Client
+                                    </span>
+                                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] px-1.5 py-0">Top Revenue</Badge>
+                                </div>
+                                <div className="my-auto">
+                                    <span className="text-xl font-extrabold text-emerald-900 block leading-tight">
+                                        {formatCurrency(metrics.highlights?.largestInvoiceCustomer?.amount)}
+                                    </span>
+                                    <span className="text-slate-800 font-bold block truncate mt-1 text-xs">
+                                        {metrics.highlights?.largestInvoiceCustomer?.name || 'N/A'}
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block border-t border-emerald-100 pt-1.5 mt-1">
+                                    {metrics.highlights?.largestInvoiceCustomer?.id || 'Cumulative Billed'}
+                                </span>
                             </div>
-                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                                <span className="text-slate-500 font-medium block">Unpaid Balance</span>
-                                <span className="text-lg font-extrabold text-amber-600 mt-0.5 block">{formatCurrency(metrics.totalOutstanding)}</span>
+
+                            {/* Oldest Job Created / Record */}
+                            <div className="bg-violet-50/60 border border-violet-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-violet-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <Clock className="h-3.5 w-3.5" /> Oldest Record Created
+                                    </span>
+                                    <Badge className="bg-violet-100 text-violet-800 border-violet-200 text-[10px] px-1.5 py-0">History</Badge>
+                                </div>
+                                <div className="my-auto">
+                                    <span className="text-xl font-extrabold text-violet-900 block leading-tight">
+                                        {formatDate(metrics.highlights?.oldestJobRecord?.date)}
+                                    </span>
+                                    <span className="text-slate-800 font-bold block truncate mt-1 text-xs">
+                                        {metrics.highlights?.oldestJobRecord?.name || 'N/A'}
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block truncate border-t border-violet-100 pt-1.5 mt-1">
+                                    Service: {metrics.highlights?.oldestJobRecord?.title || 'eWorks Job'}
+                                </span>
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                            <div className="bg-slate-50/80 border border-slate-200/80 p-3 rounded-xl flex items-center justify-between">
-                                <div>
-                                    <span className="text-slate-500 block font-medium">Jobs Queue</span>
-                                    <span className="text-slate-700 block mt-0.5 font-semibold">Live Synced</span>
+                        {/* Bottom Row: Operational & Service Highlights */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
+                            {/* Highest Job Volume Customer */}
+                            <div className="bg-indigo-50/60 border border-indigo-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-indigo-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <Briefcase className="h-3.5 w-3.5" /> Top Job Volume Client
+                                    </span>
+                                    <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-[10px] px-1.5 py-0 font-bold">
+                                        {metrics.highlights?.highestJobVolumeCustomer?.count || 0} Jobs
+                                    </Badge>
                                 </div>
-                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">OK</Badge>
+                                <div className="my-auto">
+                                    <span className="text-lg font-extrabold text-indigo-900 block truncate leading-tight">
+                                        {metrics.highlights?.highestJobVolumeCustomer?.name || 'N/A'}
+                                    </span>
+                                    <span className="text-slate-600 text-xs font-semibold block mt-0.5">
+                                        Highest activity frequency
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block border-t border-indigo-100 pt-1.5 mt-1">
+                                    {metrics.highlights?.highestJobVolumeCustomer?.id || 'Key Account'}
+                                </span>
                             </div>
-                            <div className="bg-slate-50/80 border border-slate-200/80 p-3 rounded-xl flex items-center justify-between">
-                                <div>
-                                    <span className="text-slate-500 block font-medium">Quotes Queue</span>
-                                    <span className="text-slate-700 block mt-0.5 font-semibold">Live Synced</span>
+
+                            {/* Top Service Category */}
+                            <div className="bg-blue-50/60 border border-blue-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-blue-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <Layers className="h-3.5 w-3.5" /> Top Service Line
+                                    </span>
+                                    <Badge className="bg-blue-100 text-blue-800 border-blue-200 text-[10px] px-1.5 py-0 font-bold">
+                                        Popular
+                                    </Badge>
                                 </div>
-                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">OK</Badge>
+                                <div className="my-auto">
+                                    <span className="text-lg font-extrabold text-blue-900 block leading-tight">
+                                        {metrics.serviceCategories[0]?.name || 'AC Service'}
+                                    </span>
+                                    <span className="text-slate-600 text-xs font-semibold block mt-0.5">
+                                        {metrics.serviceCategories[0]?.count || 0} Executed Jobs
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block border-t border-blue-100 pt-1.5 mt-1">
+                                    {formatCurrency(metrics.serviceCategories[0]?.revenue)} Total Billed
+                                </span>
                             </div>
-                            <div className="bg-slate-50/80 border border-slate-200/80 p-3 rounded-xl flex items-center justify-between">
-                                <div>
-                                    <span className="text-slate-500 block font-medium">Invoices Queue</span>
-                                    <span className="text-slate-700 block mt-0.5 font-semibold">Live Synced</span>
+
+                            {/* Average Job Value */}
+                            <div className="bg-amber-50/60 border border-amber-200/80 p-4 rounded-xl flex flex-col justify-between min-h-[135px] shadow-sm hover:shadow transition-shadow">
+                                <div className="flex items-center justify-between text-amber-700 font-bold mb-1">
+                                    <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider">
+                                        <TrendingUp className="h-3.5 w-3.5" /> Avg Revenue / Job
+                                    </span>
+                                    <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[10px] px-1.5 py-0 font-bold">
+                                        Average
+                                    </Badge>
                                 </div>
-                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">OK</Badge>
+                                <div className="my-auto">
+                                    <span className="text-lg font-extrabold text-amber-900 block leading-tight">
+                                        {formatCurrency(metrics.totalJobs > 0 ? metrics.totalInvoiced / metrics.totalJobs : 0)}
+                                    </span>
+                                    <span className="text-slate-600 text-xs font-semibold block mt-0.5">
+                                        Across {metrics.totalJobs.toLocaleString()} Total Jobs
+                                    </span>
+                                </div>
+                                <span className="text-slate-500 text-[10px] font-medium block border-t border-amber-100 pt-1.5 mt-1">
+                                    Average eWorks Order Value
+                                </span>
                             </div>
                         </div>
                     </CardContent>

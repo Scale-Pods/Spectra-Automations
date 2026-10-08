@@ -13,11 +13,12 @@ export default function CredentialsPage() {
     const router = useRouter();
 
     const emailList = [
-        "info@scalepods.co"
+        "tech@spectradubai.com",
+        "marketing@spectradubai.com"
     ];
 
     const whatsappNumbers = [
-        "+1 (555) 234-8901"
+        "+971 5XXXX8044"
     ];
 
     return (

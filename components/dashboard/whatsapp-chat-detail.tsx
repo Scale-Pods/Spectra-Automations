@@ -143,9 +143,10 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
     const handleCopyLink = () => {
         if (!lead) return;
         const baseUrl = window.location.origin;
+        const eworksId = (lead as any).eworks_customer_id || (lead as any).eworks_id || (lead as any).id || (lead as any)["Lead ID"];
         const rawPhone = (lead as any).lead_phone || lead.phone || (lead as any)["Phone"] || customerId;
         const cleanPhone = String(rawPhone).replace(/\s/g, '');
-        const shareId = cleanPhone || customerId;
+        const shareId = eworksId || cleanPhone || customerId;
         const shareUrl = `${baseUrl}/share/whatsapp/${encodeURIComponent(shareId)}`;
 
         if (navigator.clipboard && navigator.clipboard.writeText) {

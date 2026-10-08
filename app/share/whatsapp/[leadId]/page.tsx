@@ -129,7 +129,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
             const isEmail = decodedLeadId.includes('@');
             const query = isEmail
                 ? `channel=whatsapp&email=${encodeURIComponent(decodedLeadId)}`
-                : `channel=whatsapp&phone=${encodeURIComponent(decodedLeadId)}`;
+                : `channel=whatsapp&id=${encodeURIComponent(decodedLeadId)}`;
 
             try {
                 const res = await fetch(`/api/public/share?${query}`, {
@@ -188,7 +188,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                 {/* ── Top Bar ── */}
                 <div className="mb-3 flex items-center justify-between shrink-0 flex-wrap gap-2">
                     <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full font-semibold">
-                        📱 WhatsApp Conversation • {decodedLeadId}
+                        📱 WhatsApp Conversation • {lead?.name ? `${lead.name} (${lead.phone || decodedLeadId})` : decodedLeadId}
                     </span>
                     <div className="flex items-center gap-2">
                         <button
@@ -270,12 +270,44 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                             ) : lead ? (
                                 <div className="space-y-4 text-sm">
 
+                                    {/* Lead Name & ID */}
+                                    <div>
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Customer Profile</p>
+                                        <p className="font-bold text-base text-slate-900">{lead.name || 'WhatsApp Contact'}</p>
+                                        {lead.eworks_customer_id && (
+                                            <span className="inline-block text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded mt-1">
+                                                ID: #{lead.eworks_customer_id}
+                                            </span>
+                                        )}
+                                    </div>
+
                                     {/* Contact Info */}
                                     <div>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Contact Info</p>
-                                        <p className="font-medium text-white">{lead.phone || decodedLeadId}</p>
-                                        {lead.email && <p className="text-xs text-slate-400 mt-0.5">{lead.email}</p>}
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Contact Details</p>
+                                        <p className="font-medium text-slate-800 font-mono text-xs">{lead.phone || decodedLeadId}</p>
+                                        {lead.email && <p className="text-xs text-slate-600 mt-0.5">{lead.email}</p>}
+                                        {lead.address && <p className="text-xs text-slate-500 mt-1">{lead.address}</p>}
                                     </div>
+
+                                    {/* Service & eWorks Data */}
+                                    {(lead.category || lead.total_job_count > 0 || lead.total_invoiced_value > 0) && (
+                                        <div className="grid grid-cols-2 gap-2 pt-1">
+                                            <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase">Service Category</p>
+                                                <p className="text-xs font-bold text-slate-800 mt-0.5">{lead.category || 'General'}</p>
+                                            </div>
+                                            <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase">Completed Jobs</p>
+                                                <p className="text-xs font-bold text-slate-800 mt-0.5">{lead.total_job_count || 0}</p>
+                                            </div>
+                                            {lead.total_invoiced_value > 0 && (
+                                                <div className="col-span-2 p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                                    <p className="text-[9px] font-bold text-slate-400 uppercase">Total Invoiced</p>
+                                                    <p className="text-xs font-bold text-emerald-700 mt-0.5">AED {Number(lead.total_invoiced_value).toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Status */}
                                     {lead.status && (
@@ -291,7 +323,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {lead.source_table && (
                                         <div>
                                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Source Table</p>
-                                            <p className="text-xs font-bold text-blue-400 flex items-center gap-1">
+                                            <p className="text-xs font-bold text-blue-600 flex items-center gap-1">
                                                 <Database className="h-3 w-3" />
                                                 {lead.source_table}
                                             </p>
@@ -302,7 +334,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {lead.action_type && (
                                         <div>
                                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Action Type</p>
-                                            <p className="text-xs font-bold text-purple-400 flex items-center gap-1">
+                                            <p className="text-xs font-bold text-purple-600 flex items-center gap-1">
                                                 <Zap className="h-3 w-3" />
                                                 {lead.action_type}
                                             </p>
@@ -324,7 +356,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {lead.summary && (
                                         <div>
                                             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Summary</p>
-                                            <p className="text-xs text-slate-400 leading-relaxed">{lead.summary}</p>
+                                            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">{lead.summary}</p>
                                         </div>
                                     )}
                                 </div>

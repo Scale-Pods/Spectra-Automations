@@ -258,10 +258,11 @@ export function SMSChatDetail({ customerId, onClose, initialLead }: SMSChatDetai
     }, [customerId, initialLead]);
 
     const copyLink = () => {
-        // Use lead_phone (activity column) as primary share identifier
+        // Use eworks_customer_id or lead_phone as primary share identifier
+        const eworksId = (lead as any)?.eworks_customer_id || (lead as any)?.eworks_id || (lead as any)?.id;
         const rawPhone = lead?.["lead_phone"] || lead?.["Phone"] || lead?.phone || customerId;
-        const cleanPhone = String(rawPhone).replace(/\s/g, '');  // keep + and digits, strip spaces only
-        const shareId = cleanPhone || customerId;
+        const cleanPhone = String(rawPhone).replace(/\s/g, '');
+        const shareId = eworksId || cleanPhone || customerId;
         const shareUrl = `${window.location.origin}/share/sms/${encodeURIComponent(shareId)}`;
         navigator.clipboard.writeText(shareUrl);
         setCopied(true);
