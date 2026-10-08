@@ -292,7 +292,7 @@ export function SMSChatDetail({ customerId, onClose, initialLead }: SMSChatDetai
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 pr-8">
+                <div className="flex items-center gap-2.5 pr-12">
                     <FollowUpBossButton lead={lead} variant="button" />
                     <Button
                         variant="ghost"

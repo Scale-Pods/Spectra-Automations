@@ -54,6 +54,56 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
         return `AED ${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
+    const getEffectiveInvoicedValue = () => {
+        if (customer.total_invoiced_value && Number(customer.total_invoiced_value) > 0) {
+            return Number(customer.total_invoiced_value);
+        }
+        if (customer.latest_invoice_total && Number(customer.latest_invoice_total) > 0) {
+            return Number(customer.latest_invoice_total);
+        }
+        if (customer.latest_job_total && Number(customer.latest_job_total) > 0) {
+            return Number(customer.latest_job_total);
+        }
+        if (customer.latest_quote_total && Number(customer.latest_quote_total) > 0) {
+            return Number(customer.latest_quote_total);
+        }
+        if (customer.active_jobs && Array.isArray(customer.active_jobs) && customer.active_jobs.length > 0) {
+            const sumJobs = customer.active_jobs.reduce((acc: number, job: any) => {
+                const val = Number(job.amount ?? job.total ?? job.value ?? job.price ?? job.total_amount ?? 0);
+                return acc + (isNaN(val) ? 0 : val);
+            }, 0);
+            if (sumJobs > 0) return sumJobs;
+        }
+        return 0;
+    };
+
+    const getEffectiveReceivedValue = () => {
+        if (customer.total_received_value && Number(customer.total_received_value) > 0) {
+            return Number(customer.total_received_value);
+        }
+        if (customer.latest_invoice_received_amount && Number(customer.latest_invoice_received_amount) > 0) {
+            return Number(customer.latest_invoice_received_amount);
+        }
+        return 0;
+    };
+
+    const getEffectiveOutstandingBalance = () => {
+        if (customer.total_outstanding_balance && Number(customer.total_outstanding_balance) > 0) {
+            return Number(customer.total_outstanding_balance);
+        }
+        if (customer.latest_invoice_balance_amount && Number(customer.latest_invoice_balance_amount) > 0) {
+            return Number(customer.latest_invoice_balance_amount);
+        }
+        if (customer.latest_overdue_invoice_balance_amount && Number(customer.latest_overdue_invoice_balance_amount) > 0) {
+            return Number(customer.latest_overdue_invoice_balance_amount);
+        }
+        return 0;
+    };
+
+    const effectiveInvoiced = getEffectiveInvoicedValue();
+    const effectiveReceived = getEffectiveReceivedValue();
+    const effectiveBalance = getEffectiveOutstandingBalance();
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto bg-white/95 text-slate-900 border-slate-200 p-6 shadow-2xl rounded-2xl">
@@ -80,7 +130,7 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                 {customer.address_line || "Dubai"}, {customer.city || "Dubai"}, {customer.country || "AE"}
                             </p>
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap pr-12">
                             {customer.has_email && (
                                 <Badge className="bg-blue-50 text-blue-700 border border-blue-200 font-medium">
                                     <Mail className="h-3 w-3 mr-1" /> Email
@@ -108,12 +158,12 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-4">
                     <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3.5">
                         <span className="text-xs text-slate-500 font-medium block">Total Invoiced</span>
-                        <span className="text-lg font-extrabold text-emerald-600">{formatCurrency(customer.total_invoiced_value)}</span>
+                        <span className="text-lg font-extrabold text-emerald-600">{formatCurrency(effectiveInvoiced)}</span>
                     </div>
                     <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3.5">
                         <span className="text-xs text-slate-500 font-medium block">Outstanding Balance</span>
-                        <span className={`text-lg font-extrabold ${customer.total_outstanding_balance > 0 ? "text-amber-600" : "text-slate-700"}`}>
-                            {formatCurrency(customer.total_outstanding_balance)}
+                        <span className={`text-lg font-extrabold ${effectiveBalance > 0 ? "text-amber-600" : "text-slate-700"}`}>
+                            {formatCurrency(effectiveBalance)}
                         </span>
                     </div>
                     <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3.5">
@@ -423,18 +473,18 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
                                 <span className="text-xs text-slate-500 font-medium block">Total Invoiced</span>
-                                <span className="text-xl font-extrabold text-slate-900">{formatCurrency(customer.total_invoiced_value)}</span>
+                                <span className="text-xl font-extrabold text-slate-900">{formatCurrency(effectiveInvoiced)}</span>
                                 <span className="text-xs text-slate-500 block mt-1 font-medium">{customer.total_invoice_count} Invoices</span>
                             </div>
                             <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
                                 <span className="text-xs text-slate-500 font-medium block">Total Received</span>
-                                <span className="text-xl font-extrabold text-emerald-600">{formatCurrency(customer.total_received_value)}</span>
+                                <span className="text-xl font-extrabold text-emerald-600">{formatCurrency(effectiveReceived)}</span>
                                 <span className="text-xs text-slate-500 block mt-1 font-medium">{customer.paid_invoice_count} Paid</span>
                             </div>
                             <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
                                 <span className="text-xs text-slate-500 font-medium block">Outstanding Balance</span>
-                                <span className={`text-xl font-extrabold ${customer.total_outstanding_balance > 0 ? "text-amber-600" : "text-slate-700"}`}>
-                                    {formatCurrency(customer.total_outstanding_balance)}
+                                <span className={`text-xl font-extrabold ${effectiveBalance > 0 ? "text-amber-600" : "text-slate-700"}`}>
+                                    {formatCurrency(effectiveBalance)}
                                 </span>
                                 <span className="text-xs text-slate-500 block mt-1 font-medium">{customer.unpaid_invoice_count} Unpaid / {customer.overdue_invoice_count} Overdue</span>
                             </div>

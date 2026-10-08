@@ -422,7 +422,7 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                         )}
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pr-12">
                     <FollowUpBossButton lead={lead} variant="button" />
                     <Button
                         variant="default"

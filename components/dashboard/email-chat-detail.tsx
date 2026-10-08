@@ -280,37 +280,26 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pr-12">
                     <FollowUpBossButton lead={lead} variant="button" />
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={copyShareLink}
-                        className="gap-1.5 text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded-full border border-blue-500/30"
+                        className="gap-1.5 text-xs bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 rounded-full border border-blue-500/30"
                     >
-                        {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Share2 className="h-3.5 w-3.5" />}
+                        {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Share2 className="h-3.5 w-3.5 text-blue-600" />}
                         {copied ? "Link Copied!" : "Copy Share Link"}
                     </Button>
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={fetchLeadAndEmailThread}
-                        className="text-slate-300 hover:bg-white/10 rounded-full h-8 w-8 p-0 flex items-center justify-center border border-white/10"
+                        className="text-slate-600 hover:bg-slate-200/60 rounded-full h-8 w-8 p-0 flex items-center justify-center border border-slate-200"
                         title="Refresh thread"
                     >
                         <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
-                    {onClose && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={onClose}
-                            className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full h-8 w-8 p-0 flex items-center justify-center border border-white/10"
-                            title="Close modal"
-                        >
-                            <X className="h-4 w-4" />
-                        </Button>
-                    )}
                 </div>
             </div>
 
