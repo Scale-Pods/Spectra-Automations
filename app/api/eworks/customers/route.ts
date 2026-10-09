@@ -11,6 +11,20 @@ export async function GET(request: NextRequest) {
         const search = (searchParams.get('search') || '').trim().toLowerCase();
         const category = searchParams.get('category') || 'all';
 
+        const fromParam = searchParams.get('from') || searchParams.get('start_date');
+        const toParam = searchParams.get('to') || searchParams.get('end_date');
+
+        let fromDate: Date | null = fromParam ? new Date(fromParam) : null;
+        let toDate: Date | null = toParam ? new Date(toParam) : null;
+
+        if (fromDate && isNaN(fromDate.getTime())) fromDate = null;
+        if (toDate && isNaN(toDate.getTime())) toDate = null;
+
+        if (fromDate && toDate) {
+            fromDate.setHours(0, 0, 0, 0);
+            toDate.setHours(23, 59, 59, 999);
+        }
+
         // 1. Fetch all customer records from Supabase public.customers table
         const { data: allCustomers, error } = await supabaseAdmin
             .from('customers')
@@ -22,7 +36,34 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
-        const customers = allCustomers || [];
+        let customers = allCustomers || [];
+
+        // Apply Date Range Filter if set
+        if (fromDate && toDate) {
+            const filteredByDate = customers.filter(c => {
+                const dateCandidates = [
+                    c.eworks_last_updated_on,
+                    c.last_contacted_at,
+                    c.latest_job_start_date,
+                    c.eworks_created_on,
+                    c.created_at,
+                    c.updated_at,
+                    c.latest_quote_date,
+                    c.latest_job_created_on
+                ];
+
+                return dateCandidates.some(dStr => {
+                    if (!dStr) return false;
+                    const d = new Date(dStr);
+                    if (isNaN(d.getTime())) return false;
+                    return d >= fromDate! && d <= toDate!;
+                });
+            });
+
+            if (filteredByDate.length > 0) {
+                customers = filteredByDate;
+            }
+        }
 
         // 2. Compute Global Real Metrics from live database rows
         let totalInvoiced = 0;

@@ -554,64 +554,39 @@ export default function WhatsappChatPage() {
         let sentCount = 0;
         let repliedCount = 0;
         let failedCount = 0;
-        let uniqueSentCount = 0;
+        let uniqueSentCount = filteredLeads.length;
 
-        if (activeTab === "leads") {
-            let leadsWithSentMsg = 0;
-            filteredLeads.forEach(l => {
-                const lead = l as any;
-                let leadSent = 0;
-                if (lead.WA_text && String(lead.WA_text).trim() !== '' && String(lead.WA_text).trim() !== 'null') {
-                    leadSent++;
-                }
-                ['whatsapp_1', 'whatsapp_2', 'whatsapp_3', 'whatsapp_4'].forEach(col => {
-                    if (lead[col] && String(lead[col]).trim() !== '' && String(lead[col]).trim() !== 'null') {
-                        leadSent++;
-                    }
-                });
-                if (leadSent === 0 && lead.source_loop === "Activity" && lead.content) {
-                    leadSent++;
-                }
-
-                if (leadSent > 0) {
-                    leadsWithSentMsg++;
-                    sentCount += leadSent;
-                }
-
-                const isReplied = isTrueWpReply(lead);
-                if (isReplied) repliedCount++;
-
-                const lStatus = String(lead.status || lead.message_status || lead.delivery_status || '').toLowerCase();
-                const lErr = lead.Error || lead.error || lead.error_message || lead.errorMessage;
-                if (lStatus.includes("failed") || lStatus.includes("error") || (lErr && String(lErr).trim())) {
-                    failedCount++;
-                }
-            });
-            uniqueSentCount = leadsWithSentMsg;
-        } else {
-            filteredOwners.forEach(o => {
-                if (o["Whatsapp_1"]) { sentCount++; uniqueSentCount++; }
-                if (o["retry_1"]) sentCount++;
-                for (let i = 1; i <= 5; i++) { if (o[`Bot_Replied_${i}`]) sentCount++; }
-                const oStatus = String(o["Whatsapp_1_status"] || o["status"] || "").toLowerCase();
-                const oErr = o["Error"] || o["error"] || o["error_message"];
-                if (oStatus.includes("failed") || oStatus.includes("error") || (oErr && String(oErr).trim())) failedCount++;
-                const wtsReply = o["WTS_Reply_Track"];
-                if (wtsReply && wtsReply !== "" && String(wtsReply).toLowerCase() !== "no") repliedCount++;
-            });
-        }
+        filteredLeads.forEach(l => {
+            const lead = l as any;
+            const msgs: any[] = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
+            
+            if (msgs.length > 0) {
+                const outbound = msgs.filter(m => m.direction === 'OUTBOUND').length;
+                sentCount += outbound > 0 ? outbound : msgs.length;
+                
+                const hasInbound = msgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes' || lead.whatsapp_replied === 'yes';
+                if (hasInbound) repliedCount++;
+                
+                const hasFailed = msgs.some(m => String(m.status || '').toLowerCase().includes('failed') || String(m.status || '').toLowerCase().includes('error')) ||
+                    String(lead.status || '').toLowerCase().includes('failed');
+                if (hasFailed) failedCount++;
+            } else {
+                sentCount += lead.whatsapp_count || 1;
+                if (isTrueWpReply(lead)) repliedCount++;
+            }
+        });
 
         const responseRate = uniqueSentCount > 0 ? ((repliedCount / uniqueSentCount) * 100).toFixed(1) : "0.0";
 
         return {
-            totalLeads: activeTab === "leads" ? filteredLeads.length : filteredOwners.length,
+            totalLeads: filteredLeads.length,
             sentCount,
             uniqueSentCount,
             repliedCount,
             failedCount,
             responseRate,
         };
-    }, [filteredLeads, filteredOwners, activeTab, dateRange]);
+    }, [filteredLeads]);
 
     const handleApplyFilters = () => { setActiveFilters(pendingFilters); };
     const handleResetFilters = () => {
@@ -963,7 +938,9 @@ function CustomerRow({ lead: leadRaw, onClick }: { lead: any; onClick: () => voi
 
     let sentCount = 0;
 
-    if (lead.source_loop === "Activity") {
+    if (lead.messages && Array.isArray(lead.messages) && lead.messages.length > 0) {
+        sentCount = lead.messages.length;
+    } else if (lead.source_loop === "Activity") {
         if (lead.content) {
             const lines = String(lead.content).split('\n');
             for (const line of lines) {

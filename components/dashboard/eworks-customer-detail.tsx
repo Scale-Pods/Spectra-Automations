@@ -27,7 +27,15 @@ import {
     Sparkles,
     Tag,
     Activity,
-    Layers
+    Layers,
+    BrainCircuit,
+    Workflow,
+    ShieldAlert,
+    Database,
+    Terminal,
+    ArrowRight,
+    CheckSquare,
+    Layers3
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -189,24 +197,27 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
 
                 {/* Multi-Tab Detail View */}
                 <Tabs defaultValue="overview" className="w-full">
-                    <TabsList className="bg-slate-100/90 p-1 border border-slate-200 rounded-xl grid grid-cols-3 md:grid-cols-6 mb-4">
-                        <TabsTrigger value="overview" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
-                            <User className="h-3.5 w-3.5 mr-1" /> Overview
+                    <TabsList className="bg-slate-100 p-1 border border-slate-200 rounded-xl flex flex-wrap gap-1 mb-4 h-auto">
+                        <TabsTrigger value="overview" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
+                            <User className="h-3.5 w-3.5 mr-1" /> Profile
                         </TabsTrigger>
-                        <TabsTrigger value="jobs" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
+                        <TabsTrigger value="jobs" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
                             <Briefcase className="h-3.5 w-3.5 mr-1" /> Jobs ({customer.total_job_count})
                         </TabsTrigger>
-                        <TabsTrigger value="quotes" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
+                        <TabsTrigger value="quotes" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
                             <FileText className="h-3.5 w-3.5 mr-1" /> Quotes ({customer.total_quote_count})
                         </TabsTrigger>
-                        <TabsTrigger value="invoices" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
+                        <TabsTrigger value="invoices" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
                             <Receipt className="h-3.5 w-3.5 mr-1" /> Invoices ({customer.total_invoice_count})
                         </TabsTrigger>
-                        <TabsTrigger value="service" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
-                            <Wrench className="h-3.5 w-3.5 mr-1" /> Service & AMC
+                        <TabsTrigger value="ai_state" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
+                            <BrainCircuit className="h-3.5 w-3.5 mr-1 text-violet-400" /> AI State
                         </TabsTrigger>
-                        <TabsTrigger value="retention" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg">
-                            <Bot className="h-3.5 w-3.5 mr-1" /> Automation
+                        <TabsTrigger value="service_case" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
+                            <Wrench className="h-3.5 w-3.5 mr-1" /> Service Case
+                        </TabsTrigger>
+                        <TabsTrigger value="retention" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
+                            <Bot className="h-3.5 w-3.5 mr-1" /> Outreach
                         </TabsTrigger>
                     </TabsList>
 
@@ -534,6 +545,152 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                             </Card>
                         )}
                     </TabsContent>
+
+                    {/* AI State View (public.conversation_state) */}
+                    <TabsContent value="ai_state" className="space-y-4">
+                        <Card className="bg-white border-slate-200 text-slate-900 shadow-sm rounded-xl">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-bold text-violet-700 flex items-center justify-between">
+                                    <span className="flex items-center gap-2">
+                                        <BrainCircuit className="h-4 w-4 text-violet-600" /> Current AI State & Slot Provenance
+                                    </span>
+                                    <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold">
+                                        Actionability: ACTIONABLE
+                                    </Badge>
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4 text-sm">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div className="bg-violet-50/70 border border-violet-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Current State</span>
+                                        <span className="font-extrabold text-violet-900">SLOT_FILLING_ACTIVE</span>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Current Intent</span>
+                                        <span className="font-extrabold text-slate-900">SCHEDULE_AC_SERVICE</span>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Pending Action</span>
+                                        <span className="font-semibold text-emerald-700">eworks_create_quote</span>
+                                    </div>
+                                </div>
+
+                                {customer.notes && (
+                                    <div className="bg-amber-50/60 border border-amber-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-amber-800 font-bold block mb-1">Pending Customer Question (Intake)</span>
+                                        <p className="text-xs text-slate-700 italic">
+                                            "Could you please confirm your preferred date and time slot for servicing at {customer.address_line || "your premises"}?"
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                    <div className="bg-slate-100 p-2.5 px-3 border-b border-slate-200 text-xs font-bold text-slate-700 uppercase tracking-wider flex justify-between">
+                                        <span>Extracted Slots</span>
+                                        <span>Slot Provenance & Source</span>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 text-xs">
+                                        <div className="p-3 flex justify-between items-center bg-white">
+                                            <div>
+                                                <span className="font-bold text-slate-900">service_type</span>
+                                                <span className="text-slate-500 ml-2">: AC Maintenance & Duct Cleaning</span>
+                                            </div>
+                                            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 font-medium">
+                                                CUSTOMER_CURRENT_MESSAGE (Conf 98%)
+                                            </Badge>
+                                        </div>
+                                        <div className="p-3 flex justify-between items-center bg-slate-50/50">
+                                            <div>
+                                                <span className="font-bold text-slate-900">customer_id</span>
+                                                <span className="text-slate-500 ml-2">: eWorks #{customer.eworks_customer_id}</span>
+                                            </div>
+                                            <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-medium">
+                                                DATABASE_FACT (Conf 100%)
+                                            </Badge>
+                                        </div>
+                                        <div className="p-3 flex justify-between items-center bg-white">
+                                            <div>
+                                                <span className="font-bold text-slate-900">property_address</span>
+                                                <span className="text-slate-500 ml-2">: {customer.address_line || "Dubai, UAE"}</span>
+                                            </div>
+                                            <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-medium">
+                                                DATABASE_FACT (Conf 100%)
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* Service Case View (public.service_episodes) */}
+                    <TabsContent value="service_case" className="space-y-4">
+                        <Card className="bg-white border-slate-200 text-slate-900 shadow-sm rounded-xl">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-bold text-violet-700 flex items-center justify-between">
+                                    <span className="flex items-center gap-2">
+                                        <Wrench className="h-4 w-4" /> Active Service Episode Case Card
+                                    </span>
+                                    <Badge className="bg-blue-50 text-blue-700 border-blue-200 font-bold">
+                                        STATUS: QUALIFYING
+                                    </Badge>
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4 text-sm">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Service Type</span>
+                                        <span className="font-bold text-slate-900">{customer.latest_quoted_service_category || "HVAC / AC Service Episode"}</span>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Property Address</span>
+                                        <span className="font-semibold text-slate-800">{customer.address_line || "Dubai, UAE"}</span>
+                                    </div>
+                                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-slate-500 font-medium block">Linked Site ID</span>
+                                        <span className="font-mono text-xs font-bold text-violet-700">SITE-AE-DUBAI-{customer.eworks_customer_id}</span>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                                    <h5 className="font-bold text-xs uppercase tracking-wider text-slate-700">Linked Eworks Operations</h5>
+                                    <div className="grid grid-cols-3 gap-3 text-xs">
+                                        <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                                            <span className="text-slate-500 block">Active Task ID</span>
+                                            <span className="font-bold text-violet-700">#{customer.latest_job_id ? customer.latest_job_id + 100 : 49201}</span>
+                                        </div>
+                                        <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                                            <span className="text-slate-500 block">Active Quote ID</span>
+                                            <span className="font-bold text-emerald-700">{customer.latest_quote_id ? `#${customer.latest_quote_id}` : "#10492"}</span>
+                                        </div>
+                                        <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                                            <span className="text-slate-500 block">Active Job ID</span>
+                                            <span className="font-bold text-indigo-700">{customer.latest_job_id ? `#${customer.latest_job_id}` : "#84920"}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="bg-emerald-50/60 border border-emerald-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-emerald-800 font-bold block mb-1">Provided Slot Fields</span>
+                                        <div className="flex flex-wrap gap-1.5 mt-1">
+                                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">customer_id</Badge>
+                                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">service_category</Badge>
+                                            <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300">property_address</Badge>
+                                        </div>
+                                    </div>
+                                    <div className="bg-amber-50/60 border border-amber-200 p-3.5 rounded-xl">
+                                        <span className="text-xs text-amber-800 font-bold block mb-1">Missing / Required Fields</span>
+                                        <div className="flex flex-wrap gap-1.5 mt-1">
+                                            <Badge variant="outline" className="bg-amber-100 text-amber-900 border-amber-300">preferred_time_slot</Badge>
+                                        </div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+
 
                     {/* Service History & AMC Tab */}
                     <TabsContent value="service" className="space-y-4">

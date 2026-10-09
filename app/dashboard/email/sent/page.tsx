@@ -45,11 +45,10 @@ export default function SentEmailsPage() {
     const { leads: allLeads, loadingLeads } = useData();
     const [page, setPage] = useState(1);
     const [selectedLeadItem, setSelectedLeadItem] = useState<{ id: string; initialLead?: any } | null>(null);
-    const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
-        to: new Date(),
-    });
-    const loading = loadingLeads;
+    const [dateRange, setDateRange] = useState<any>(undefined);
+    const [apiEmailLeads, setApiEmailLeads] = useState<any[]>([]);
+    const [loadingApi, setLoadingApi] = useState(false);
+
     const [searchQuery, setSearchQuery] = useState("");
     const [filters, setFilters] = useState({
         campaign: "all",
@@ -57,39 +56,91 @@ export default function SentEmailsPage() {
         type: "all",
     });
 
+    useEffect(() => {
+        const fetchEmailThreads = async () => {
+            setLoadingApi(true);
+            try {
+                const res = await fetch('/api/email');
+                if (res.ok) {
+                    const data = await res.json();
+                    setApiEmailLeads(data.email_leads || []);
+                }
+            } catch (err) {
+                console.error("Error fetching email threads:", err);
+            } finally {
+                setLoadingApi(false);
+            }
+        };
+        fetchEmailThreads();
+    }, []);
+
+    const loading = loadingLeads || loadingApi;
+
     const sentEmails = useMemo(() => {
         const result: any[] = [];
-        allLeads.forEach((lead: any) => {
-            const hasReplied = lead.email_reply &&
-                String(JSON.stringify(lead.email_reply)) !== '[]' &&
-                String(JSON.stringify(lead.email_reply)) !== 'null';
 
-            ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
-                const val = lead[col] || lead[`${col}_status`];
-                if (val && String(val).trim() !== '' && String(val).trim() !== 'null' && String(val).trim() !== 'undefined') {
-                    const recipientName = lead.full_name || lead.customer_name || lead.name || lead.email || "Lead";
-                    const sentDate = lead.created_at || lead.eworks_created_on ? format(new Date(lead.created_at || lead.eworks_created_on), "yyyy-MM-dd HH:mm") : "Recent";
-                    const rawContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
-                    result.push({
-                        id: `${lead.id}-email-${idx + 1}`,
-                        recipient: recipientName,
-                        email: lead.email || "",
-                        sender: lead.sender || "Outreach System",
-                        type: `EMAIL STEP ${idx + 1}`,
-                        sentDate,
-                        rawDate: lead.created_at || lead.eworks_created_on,
-                        subject: lead.subject || `Email Step ${idx + 1}`,
-                        body: rawContent,
-                        content: rawContent,
-                        campaign: lead.source_loop || lead.source_table || "Email Campaign",
-                        hasReplied: !!hasReplied,
-                        rawLead: lead,
-                    });
-                }
+        // 1. Process email threads from /api/email (public.messages table)
+        if (apiEmailLeads && apiEmailLeads.length > 0) {
+            apiEmailLeads.forEach((lead: any, lIdx: number) => {
+                const recipientEmail = lead.recipient_address || lead.email || lead.Email || "Lead";
+                const recipientName = lead.full_name || lead.customer_name || lead.name || recipientEmail;
+                const messagesList = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
+                const latestMsg = messagesList[messagesList.length - 1] || {};
+
+                result.push({
+                    id: lead.id || lead.recipient_address || `email-thread-${lIdx}`,
+                    recipient: recipientName,
+                    email: recipientEmail,
+                    sender: latestMsg.sender_address || "outreach@spectradubai.com",
+                    type: latestMsg.provider || "EMAIL OUTREACH",
+                    sentDate: lead.created_at ? format(new Date(lead.created_at), "yyyy-MM-dd HH:mm") : "Recent",
+                    rawDate: lead.created_at,
+                    subject: lead.subject || latestMsg.subject || "Spectra Service Outreach",
+                    body: latestMsg.body_text || latestMsg.content || "Email conversation thread.",
+                    content: latestMsg.body_text || latestMsg.content || "Email conversation thread.",
+                    campaign: "Email Campaign",
+                    hasReplied: lead.replied === 'yes',
+                    rawLead: lead,
+                    messagesList
+                });
             });
-        });
+        }
+
+        // 2. Fallback / supplement from allLeads if apiEmailLeads is empty
+        if (result.length === 0) {
+            allLeads.forEach((lead: any) => {
+                const hasReplied = lead.email_reply &&
+                    String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                    String(JSON.stringify(lead.email_reply)) !== 'null';
+
+                ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
+                    const val = lead[col] || lead[`${col}_status`];
+                    if (val && String(val).trim() !== '' && String(val).trim() !== 'null' && String(val).trim() !== 'undefined') {
+                        const recipientName = lead.full_name || lead.customer_name || lead.name || lead.email || "Lead";
+                        const sentDate = lead.created_at || lead.eworks_created_on ? format(new Date(lead.created_at || lead.eworks_created_on), "yyyy-MM-dd HH:mm") : "Recent";
+                        const rawContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                        result.push({
+                            id: lead.id || lead.email || `${lead.id}-email-${idx + 1}`,
+                            recipient: recipientName,
+                            email: lead.email || "",
+                            sender: lead.sender || "outreach@spectradubai.com",
+                            type: `EMAIL STEP ${idx + 1}`,
+                            sentDate,
+                            rawDate: lead.created_at || lead.eworks_created_on,
+                            subject: lead.subject || `Email Step ${idx + 1}`,
+                            body: rawContent,
+                            content: rawContent,
+                            campaign: lead.source_loop || lead.source_table || "Email Campaign",
+                            hasReplied: !!hasReplied,
+                            rawLead: lead,
+                        });
+                    }
+                });
+            });
+        }
+
         return result;
-    }, [allLeads]);
+    }, [allLeads, apiEmailLeads]);
 
 
     // Dynamic filter options derived from actual database records
@@ -166,7 +217,7 @@ export default function SentEmailsPage() {
             {loading && <LMLoader />}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight text-[var(--label-primary)]">Sent Emails</h1>
+                    <h1 className="text-2xl font-bold tracking-tight text-[var(--label-primary)]">Emails Sent</h1>
                     <p className="text-[var(--label-secondary)]">View and manage your sent email history.</p>
                 </div>
             </div>
@@ -272,26 +323,26 @@ export default function SentEmailsPage() {
 
             {/* Pagination */}
             {!loading && filteredEmails.length > ITEMS_PER_PAGE && (
-                <div className="flex items-center justify-between pt-4 border-t border-[var(--separator)]">
-                    <p className="text-sm text-[var(--label-secondary)]">
+                <div className="flex items-center justify-between pt-4 border-t border-slate-200/80">
+                    <p className="text-sm text-slate-600 font-medium">
                         Showing{" "}
-                        <span className="font-medium">{(page - 1) * ITEMS_PER_PAGE + 1}</span>–
-                        <span className="font-medium">
+                        <span className="font-bold text-slate-900">{(page - 1) * ITEMS_PER_PAGE + 1}</span>–
+                        <span className="font-bold text-slate-900">
                             {Math.min(page * ITEMS_PER_PAGE, filteredEmails.length)}
                         </span>{" "}
-                        of <span className="font-medium">{filteredEmails.length}</span> results
+                        of <span className="font-bold text-slate-900">{filteredEmails.length}</span> results
                     </p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={() => setPage(Math.max(1, page - 1))}
                             disabled={page === 1}
-                            className="gap-1"
+                            className="gap-1.5 border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 font-semibold shadow-xs cursor-pointer"
                         >
-                            <ArrowLeft className="h-4 w-4" /> Previous
+                            <ArrowLeft className="h-4 w-4 text-slate-600" /> Previous
                         </Button>
-                        <span className="text-sm font-medium text-[var(--label-secondary)]">
+                        <span className="text-sm font-semibold text-slate-700 px-2">
                             Page {page} of {totalPages}
                         </span>
                         <Button
@@ -299,9 +350,9 @@ export default function SentEmailsPage() {
                             size="sm"
                             onClick={() => setPage(Math.min(totalPages, page + 1))}
                             disabled={page === totalPages}
-                            className="gap-1"
+                            className="gap-1.5 border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:bg-slate-100 disabled:text-slate-400 font-semibold shadow-xs cursor-pointer"
                         >
-                            Next <ArrowRight className="h-4 w-4" />
+                            Next <ArrowRight className="h-4 w-4 text-slate-600" />
                         </Button>
                     </div>
                 </div>
@@ -309,8 +360,14 @@ export default function SentEmailsPage() {
 
             {/* Email Chat Detail Modal Overlay */}
             {selectedLeadItem && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-                    <div className="w-full max-w-4xl h-[85vh] rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+                <div
+                    className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150 cursor-pointer"
+                    onClick={() => setSelectedLeadItem(null)}
+                >
+                    <div
+                        className="w-full max-w-4xl h-[88vh] rounded-2xl overflow-hidden shadow-2xl transition-all cursor-default"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <EmailChatDetail
                             leadId={selectedLeadItem.id}
                             initialLead={selectedLeadItem.initialLead}
@@ -411,33 +468,33 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
         <Collapsible
             open={isOpen}
             onOpenChange={setIsOpen}
-            className="bg-white/90 backdrop-blur-xl border border-slate-200/80 rounded-xl shadow-md transition-all hover:border-slate-300 overflow-hidden text-slate-900"
+            className="bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-xl shadow-xs transition-all hover:border-slate-300 hover:shadow-md overflow-hidden text-slate-900"
         >
             <CollapsibleTrigger asChild>
                 <div className="p-5 cursor-pointer group hover:bg-slate-50/80 transition-colors">
                     <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
                         <div className="flex items-start gap-4">
-                            <div className="h-10 w-10 shrink-0 bg-violet-50 text-violet-600 rounded-full flex items-center justify-center border border-violet-200 mt-0.5">
+                            <div className="h-10 w-10 shrink-0 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center border border-purple-200 mt-0.5 shadow-2xs">
                                 <Mail className="h-5 w-5" />
                             </div>
                             <div className="space-y-1.5">
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <Badge
                                         variant="secondary"
-                                        className="bg-slate-100 text-slate-700 text-[10px] tracking-wider font-bold uppercase border border-slate-200"
+                                        className="bg-slate-100 text-slate-700 text-[10px] tracking-wider font-semibold uppercase border border-slate-200"
                                     >
                                         {email.type}
                                     </Badge>
                                     <Badge
                                         variant="outline"
-                                        className="text-purple-400 border-purple-500/30 bg-purple-500/10 text-[10px] uppercase font-bold"
+                                        className="text-purple-700 border-purple-200 bg-purple-50 text-[10px] uppercase font-semibold"
                                     >
                                         {email.campaign || email.loop}
                                     </Badge>
                                     {email.hasReplied && (
                                         <Badge
                                             variant="outline"
-                                            className="text-emerald-400 border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold gap-1"
+                                            className="text-emerald-700 border-emerald-200 bg-emerald-50 text-[10px] font-semibold gap-1"
                                         >
                                             <Reply className="h-3 w-3" /> Replied
                                         </Badge>
@@ -445,38 +502,43 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
                                     {email.sentDate && (
                                         <Badge
                                             variant="outline"
-                                            className="text-cyan-400 border-cyan-500/30 bg-cyan-500/10 text-[10px]"
+                                            className="text-cyan-700 border-cyan-200 bg-cyan-50 text-[10px] font-medium"
                                         >
                                             {email.sentDate}
                                         </Badge>
                                     )}
                                 </div>
-                                <h4 className="text-base font-bold text-white">{email.recipient}</h4>
+                                <h4 className="text-base font-bold text-slate-900 leading-tight">
+                                    {email.subject || 'Spectra Email Outreach'}
+                                </h4>
+                                <p className="text-xs font-semibold text-slate-600">
+                                    Recipient: <span className="text-slate-900 font-bold">{email.recipient}</span> {email.email ? `(${email.email})` : ''}
+                                </p>
                                 {!isOpen && (
-                                    <p className="text-xs text-slate-400 truncate max-w-xl">
+                                    <p className="text-xs text-slate-500 truncate max-w-xl font-normal mt-0.5">
                                         {previewText.substring(0, 100)}{previewText.length > 100 ? '...' : ''}
                                     </p>
                                 )}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
                             <FollowUpBossButton lead={email.rawLead || email} variant="button" />
                             <Button
                                 size="sm"
-                                variant="ghost"
+                                variant="outline"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     const shareId = email.rawLead?.lead_email || email.rawLead?.email || email.recipient || email.id;
                                     onOpenThread(shareId, email.rawLead);
                                 }}
-                                className="h-8 text-xs gap-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 border border-blue-500/20 rounded-lg font-semibold"
+                                className="h-8 text-xs gap-1.5 text-blue-600 border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 hover:text-blue-700 rounded-lg font-semibold shadow-2xs"
                             >
                                 <MessageSquare className="h-3.5 w-3.5" /> Full Thread
                             </Button>
                             {isOpen ? (
-                                <ChevronUp className="h-4 w-4 text-slate-400" />
+                                <ChevronUp className="h-4 w-4 text-slate-500" />
                             ) : (
-                                <ChevronDown className="h-4 w-4 text-slate-400 group-hover:text-white" />
+                                <ChevronDown className="h-4 w-4 text-slate-400 group-hover:text-slate-700 transition-colors" />
                             )}
                         </div>
                     </div>
@@ -485,10 +547,10 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
 
             <CollapsibleContent>
                 <div className="px-5 pb-5 pt-0">
-                    <div className="border-t border-white/10 pt-4 space-y-3">
+                    <div className="border-t border-slate-200/80 pt-4 space-y-3">
                         {email.sender && (
-                            <p className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
-                                <span className="font-semibold text-slate-300">From:</span> {email.sender}
+                            <p className="text-xs text-slate-500 flex items-center gap-1.5 font-mono">
+                                <span className="font-semibold text-slate-700">From:</span> {email.sender}
                             </p>
                         )}
 
@@ -499,26 +561,26 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
                                 return (
                                     <div
                                         key={idx}
-                                        className={`p-3.5 rounded-xl border text-xs leading-relaxed transition-all ${
+                                        className={`p-4 rounded-xl border text-xs leading-relaxed transition-all ${
                                             isAgent
-                                                ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-100'
-                                                : 'bg-purple-500/10 border-purple-500/20 text-purple-100'
+                                                ? 'bg-emerald-50/60 border-emerald-200/90 text-slate-800'
+                                                : 'bg-purple-50/60 border-purple-200/90 text-slate-800'
                                         }`}
                                     >
-                                        <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-white/10">
+                                        <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/70">
                                             <span className={`font-bold flex items-center gap-1.5 text-[11px] uppercase tracking-wider ${
-                                                isAgent ? 'text-emerald-400' : 'text-purple-400'
+                                                isAgent ? 'text-emerald-700' : 'text-purple-700'
                                             }`}>
                                                 {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
                                                 {turn.label}
                                             </span>
                                             {turn.timestamp && (
-                                                <span className="text-[10px] text-slate-400 font-mono">
+                                                <span className="text-[10px] text-slate-500 font-mono font-medium">
                                                     {turn.timestamp}
                                                 </span>
                                             )}
                                         </div>
-                                        <p className="whitespace-pre-wrap leading-relaxed">{turn.text}</p>
+                                        <p className="whitespace-pre-wrap leading-relaxed text-slate-700 font-normal">{turn.text}</p>
                                     </div>
                                 );
                             })}

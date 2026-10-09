@@ -34,7 +34,7 @@ const emailSidebarItems = [
         icon: LayoutDashboard,
     },
     {
-        title: "Sent",
+        title: "Emails Sent",
         href: "/dashboard/email/sent",
         icon: Send,
     },

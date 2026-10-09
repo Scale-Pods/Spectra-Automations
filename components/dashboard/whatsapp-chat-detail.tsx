@@ -266,10 +266,20 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                 const f = found as any;
                 let timeline: any[] = [];
 
-                const rawContent = f.content || f.WA_text || f.whatsapp_text || f["WA_text"];
-                if (rawContent) {
-                    timeline = parseActivityContent(rawContent, f.summary || f.WA_note);
+                if (f.messages && Array.isArray(f.messages) && f.messages.length > 0) {
+                    timeline = f.messages.map((m: any, idx: number) => ({
+                        type: m.direction === 'INBOUND' ? 'user' : 'bot',
+                        content: m.body_text || m.subject || '',
+                        label: m.direction === 'INBOUND' ? 'User' : (m.provider || 'Spectra AI'),
+                        date: m.sent_or_received_at || m.created_at,
+                        sequence: idx + 1,
+                        tsStatus: m.status
+                    }));
                 } else {
+                    const rawContent = f.content || f.WA_text || f.whatsapp_text || f["WA_text"];
+                    if (rawContent) {
+                        timeline = parseActivityContent(rawContent, f.summary || f.WA_note);
+                    } else {
                     const parseMsg = (raw: any, label: string, type: 'bot' | 'user', sequence: number) => {
                         if (!raw || !String(raw).trim()) return null;
                         const rawStr = String(raw).trim();
@@ -342,8 +352,9 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                         }
                     }
                 }
+            }
 
-                setMessages(timeline);
+            setMessages(timeline);
             } else {
                 setLead(null);
                 setMessages(EMPTY_MESSAGES);

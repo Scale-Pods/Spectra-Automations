@@ -31,7 +31,7 @@ const whatsappSidebarItems = [
         icon: LayoutDashboard,
     },
     {
-        title: "Chat",
+        title: "Whatsapp Chat",
         href: "/dashboard/whatsapp/chat",
         icon: MessageSquare,
     },

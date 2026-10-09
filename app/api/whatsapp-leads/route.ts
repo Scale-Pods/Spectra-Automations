@@ -1,105 +1,87 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchMessages, groupMessagesByRecipient } from '@/lib/messages-data';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-function parseWADateToISO(raw: any): string | null {
-    if (!raw) return null;
-    if (typeof raw === 'number') return new Date(raw).toISOString();
-    const s = String(raw).trim();
-    if (!s) return null;
-
-    const ddmmyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-    if (ddmmyyyy) {
-        const day = ddmmyyyy[1].padStart(2, '0');
-        const month = ddmmyyyy[2].padStart(2, '0');
-        const year = ddmmyyyy[3];
-        const hh = (ddmmyyyy[4] || '00').padStart(2, '0');
-        const mm = (ddmmyyyy[5] || '00').padStart(2, '0');
-        const ss = (ddmmyyyy[6] || '00').padStart(2, '0');
-        const d = new Date(`${year}-${month}-${day}T${hh}:${mm}:${ss}.000Z`);
-        if (!isNaN(d.getTime())) return d.toISOString();
-    }
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-}
-
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const from = searchParams.get('from');
-        const to = searchParams.get('to');
+        const search = searchParams.get('search');
 
-        // Fetch WhatsApp-eligible customers
+        // Query messages for WHATSAPP channel
+        const { messages } = await fetchMessages({
+            channel: 'WHATSAPP',
+            search: search || undefined,
+            limit: 500
+        });
+
+        // Also query customers table to join customer data if available
         const { data: customerRows } = await supabaseAdmin
             .from('customers')
-            .select('*')
-            .order('created_at', { ascending: false });
+            .select('*');
 
-        const customers = customerRows || [];
+        const customersMap = new Map<string, any>();
+        (customerRows || []).forEach(c => {
+            if (c.id) customersMap.set(c.id, c);
+            if (c.phone_e164) customersMap.set(c.phone_e164.replace(/\D/g, ''), c);
+            if (c.eworks_customer_id) customersMap.set(String(c.eworks_customer_id), c);
+        });
+
+        // Group messages by recipient_address
+        const leadSummaries = groupMessagesByRecipient(messages);
 
         const nr_wf: any[] = [];
         const followup: any[] = [];
         const nurture: any[] = [];
-        const owners: any[] = [];
+        const wa_activity: any[] = [];
 
-        function checkIsReplied(val: any): boolean {
-            if (!val) return false;
-            const str = String(val).trim().toLowerCase();
-            return str !== '' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
-        }
-
-        customers.forEach((row: any) => {
-            const phone = row.phone_e164 || row.mobile_raw || row.telephone_raw || '';
-            const name = row.full_name || row.customer_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'WhatsApp Lead';
-            const isWpReplied = checkIsReplied(row.WA_replied);
-            const createdIso = row.created_at || row.eworks_created_on || new Date().toISOString();
-
-            const hasWaMsg = !!(
-                (row.WA_text && String(row.WA_text).trim()) ||
-                (row.whatsapp_1 && String(row.whatsapp_1).trim()) ||
-                (row.whatsapp_2 && String(row.whatsapp_2).trim()) ||
-                (row.whatsapp_3 && String(row.whatsapp_3).trim()) ||
-                (row.whatsapp_4 && String(row.whatsapp_4).trim())
-            );
-
-            // Filter out leads with no WhatsApp activity or sequence
-            if (!hasWaMsg && !isWpReplied && String(row.sequence_channel || '').toLowerCase() !== 'whatsapp') {
-                return;
-            }
+        leadSummaries.forEach(lead => {
+            const matchedCust = lead.customer_id ? customersMap.get(lead.customer_id) : (lead.eworks_customer_id ? customersMap.get(String(lead.eworks_customer_id)) : null);
+            
+            const isReplied = lead.direction === 'INBOUND' || lead.messages.some(m => m.direction === 'INBOUND');
+            const createdIso = lead.latest_date || new Date().toISOString();
 
             const leadObj = {
-                ...row,
-                _source_table: 'customers',
-                id: row.id,
-                Name: name,
-                name: name,
-                full_name: name,
-                Phone: phone,
-                phone: phone,
-                phone_e164: phone,
-                Email: row.email || '',
-                email: row.email || '',
-                city: row.city || 'Dubai',
-                "W.P_1": row.WA_text || row.whatsapp_1 || "",
-                "W.P_2": row.whatsapp_2 || "",
-                "W.P_3": row.whatsapp_3 || "",
-                "1st_wa_ts": hasWaMsg ? createdIso : null,
-                wp1_parsed_date: hasWaMsg ? createdIso : null,
-                WP_Replied_track: isWpReplied ? (row.WA_replied || "Replied") : "",
-                replied: isWpReplied ? (row.WA_replied || "yes") : "no",
-                whatsapp_replied: isWpReplied ? (row.WA_replied || "yes") : "",
-                whatsapp_count: hasWaMsg ? 1 : 0,
-                sequence_channel: row.sequence_channel || 'WHATSAPP',
-                sequence_step: row.sequence_step || 1,
-                total_job_count: row.total_job_count || 0,
-                total_invoiced_value: row.total_invoiced_value || 0,
-                category: row.latest_quoted_service_category || 'General Service',
+                ...matchedCust,
+                id: lead.customer_id || lead.recipient_address,
+                conversation_id: lead.conversation_id,
+                eworks_customer_id: lead.eworks_customer_id || matchedCust?.eworks_customer_id || null,
+                recipient_address: lead.recipient_address, // Unique constraint
+                Name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
+                name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
+                full_name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
+                Phone: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
+                phone: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
+                phone_e164: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
+                Email: matchedCust?.email || '',
+                email: matchedCust?.email || '',
+                city: matchedCust?.city || 'Dubai',
+                address: matchedCust?.address_line || '',
+                "W.P_1": lead.latest_body || "Outreach WhatsApp Message",
+                "W.P_2": lead.messages[1]?.body_text || "",
+                "W.P_3": lead.messages[2]?.body_text || "",
+                "1st_wa_ts": createdIso,
+                wp1_parsed_date: createdIso,
+                WP_Replied_track: isReplied ? "Replied" : "",
+                replied: isReplied ? "yes" : "no",
+                whatsapp_replied: isReplied ? "yes" : "",
+                whatsapp_count: lead.message_count,
+                sequence_channel: 'WHATSAPP',
+                sequence_step: lead.message_count,
+                total_job_count: matchedCust?.total_job_count || 0,
+                total_invoiced_value: matchedCust?.total_invoiced_value || 0,
+                category: matchedCust?.latest_quoted_service_category || 'General Service',
+                raw_payload: lead.raw_payload_parsed,
+                messages: lead.messages,
+                _source_table: 'messages'
             };
 
-            if (isWpReplied) {
+            wa_activity.push(leadObj);
+
+            if (isReplied) {
                 followup.push(leadObj);
-            } else if (hasWaMsg) {
+            } else if (lead.message_count > 0) {
                 nr_wf.push(leadObj);
             } else {
                 nurture.push(leadObj);
@@ -110,15 +92,21 @@ export async function GET(request: NextRequest) {
             nr_wf,
             followup,
             nurture,
-            owners,
-            wa_activity: [],
+            owners: [],
+            wa_activity,
+            messages
         }, {
-            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
         });
-    } catch (error) {
-        console.error('Error in whatsapp-leads route:', error);
+    } catch (error: any) {
+        console.error('Error in whatsapp-leads API route:', error);
         return NextResponse.json({
-            nr_wf: [], followup: [], nurture: [], owners: [], wa_activity: [],
+            nr_wf: [],
+            followup: [],
+            nurture: [],
+            owners: [],
+            wa_activity: [],
+            messages: []
         }, { status: 500 });
     }
 }

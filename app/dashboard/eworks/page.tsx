@@ -47,11 +47,17 @@ import {
     ResponsiveContainer,
     Legend
 } from "recharts";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 export default function EworksDashboardPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [filterCategory, setFilterCategory] = useState<"all" | "active_jobs" | "pending_quotes" | "unpaid_invoices" | "amc" | "retention_ready">("all");
+    const [dateRange, setDateRange] = useState<DateRange | undefined>({
+        from: subDays(new Date(), 7),
+        to: new Date(),
+    });
     const [selectedCustomer, setSelectedCustomer] = useState<EworksCustomer | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
 
@@ -100,10 +106,10 @@ export default function EworksDashboardPage() {
         retention_ready: 0
     });
 
-    // Reset page to 1 whenever search query or category filter changes
+    // Reset page to 1 whenever search query, category filter, or date range changes
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, filterCategory]);
+    }, [searchTerm, filterCategory, dateRange]);
 
     // Fetch Live Real Data from /api/eworks/customers
     const fetchEworksData = useCallback(async (showFullLoader = true) => {
@@ -117,6 +123,13 @@ export default function EworksDashboardPage() {
                 search: searchTerm.trim(),
                 category: filterCategory
             });
+
+            if (dateRange?.from) {
+                query.set('from', dateRange.from.toISOString());
+            }
+            if (dateRange?.to) {
+                query.set('to', dateRange.to.toISOString());
+            }
 
             const res = await fetch(`/api/eworks/customers?${query.toString()}`);
             if (!res.ok) {
@@ -134,7 +147,7 @@ export default function EworksDashboardPage() {
             setLoading(false);
             setIsRefreshing(false);
         }
-    }, [currentPage, itemsPerPage, searchTerm, filterCategory]);
+    }, [currentPage, itemsPerPage, searchTerm, filterCategory, dateRange]);
 
     useEffect(() => {
         fetchEworksData(currentPage === 1 && customers.length === 0);
@@ -182,12 +195,19 @@ export default function EworksDashboardPage() {
                         Real-time live Supabase database telemetry of eWorks customers, active job executions, quote proposals, invoice balances, and automation decisions.
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <DateRangePicker
+                        value={dateRange}
+                        onUpdate={({ range }) => {
+                            setDateRange(range);
+                            setCurrentPage(1);
+                        }}
+                    />
                     <Button
                         variant="outline"
                         onClick={() => fetchEworksData(false)}
                         disabled={isRefreshing}
-                        className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 text-xs shadow-sm rounded-xl"
+                        className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 text-xs shadow-sm rounded-xl h-10 px-4"
                     >
                         <RefreshCw className={`h-3.5 w-3.5 mr-2 text-violet-600 ${isRefreshing ? "animate-spin" : ""}`} />
                         {isRefreshing ? "Refreshing Database..." : "Sync eWorks Database"}

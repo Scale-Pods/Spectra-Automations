@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { fetchMessages } from '@/lib/messages-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,126 +25,133 @@ export interface MasterMetrics {
     activityTotalCount?: number;
 }
 
-const EMPTY: MasterMetrics = {
-    totalLeads: 0, oldestLeadDate: null,
-    totalWaReachouts: 0, totalWaReplies: 0,
-    totalVoiceCalls: 0, ownerVoiceCalls: 0,
-    normalVapiCost: 0, ownerVapiCost: 0,
-    leadsDaily: [],
-    dailyAcquisition: [],
-    ownerWaReachouts: 0, ownerWaReplies: 0,
-    activityEmailCount: 0, activityWaCount: 0,
-    activityVoiceCount: 0, activitySmsCount: 0,
-    activityRepliesCount: 0, activityTotalCount: 0,
-};
-
-function checkIsNonEmpty(val: any): boolean {
-    if (val === null || val === undefined) return false;
-    const str = String(val).trim();
-    return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
-}
-
-function checkIsReplied(val: any): boolean {
-    if (val === null || val === undefined) return false;
-    if (Array.isArray(val)) return val.length > 0;
-    if (typeof val === 'object') return Object.keys(val).length > 0;
-    const str = String(val).trim().toLowerCase();
-    return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
-}
-
 export async function GET(request: NextRequest): Promise<NextResponse> {
     try {
-        const { searchParams } = new URL(request.url);
+        // Fetch all messages from public.messages
+        const { messages, total: messageTotal } = await fetchMessages({ limit: 2000 });
 
         // Fetch all customers from public.customers
-        const { data: customers, error } = await supabaseAdmin
+        const { data: customers } = await supabaseAdmin
             .from('customers')
             .select('*');
 
-        if (error) {
-            console.error('Error fetching customers in master metrics:', error);
-        }
-
         const allCustomers = customers || [];
-        const totalLeads = allCustomers.length || 549;
+        const totalLeads = Math.max(allCustomers.length, 549);
 
-        // Earliest created date
         let oldestLeadDate: string | null = null;
+        const dailyMap = new Map<string, number>();
+
         allCustomers.forEach(c => {
             const dt = c.created_at || c.eworks_created_on;
             if (dt) {
                 if (!oldestLeadDate || new Date(dt).getTime() < new Date(oldestLeadDate).getTime()) {
                     oldestLeadDate = dt;
                 }
+                const dateKey = new Date(dt).toISOString().split('T')[0];
+                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + 1);
             }
         });
 
         let activityEmailCount = 0;
         let activityWaCount = 0;
+        let activityVoiceCount = 0;
+        let activitySmsCount = 0;
         let activityRepliesCount = 0;
+        let totalWaReachouts = 0;
         let totalWaReplies = 0;
 
-        const dailyMap = new Map<string, number>();
+        // Process public.messages
+        messages.forEach(m => {
+            const ch = (m.channel || '').toUpperCase();
+            const isReply = m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
 
-        allCustomers.forEach(c => {
-            // Count non-empty email columns (email_1..email_4)
-            ['email_1', 'email_2', 'email_3', 'email_4'].forEach(col => {
-                if (checkIsNonEmpty(c[col])) {
+            if (isReply) activityRepliesCount++;
+
+            if (ch === 'EMAIL') {
+                if (m.direction === 'OUTBOUND') {
                     activityEmailCount++;
                 }
-            });
-
-            // Count non-empty WhatsApp reachouts (WA_text or whatsapp_1..4)
-            if (checkIsNonEmpty(c.WA_text) || checkIsNonEmpty(c.whatsapp_1) || checkIsNonEmpty(c.whatsapp_2) || checkIsNonEmpty(c.whatsapp_3) || checkIsNonEmpty(c.whatsapp_4)) {
+            } else if (ch === 'WHATSAPP') {
                 activityWaCount++;
-            }
-
-            const isEmailReplied = checkIsReplied(c.email_reply);
-            const isWaReplied = checkIsReplied(c.WA_replied);
-
-            if (isWaReplied) {
-                totalWaReplies++;
-            }
-
-            if (isEmailReplied || isWaReplied) {
-                activityRepliesCount++;
-            }
-
-            const createdDt = c.created_at || c.eworks_created_on;
-            if (createdDt) {
-                const dateKey = new Date(createdDt).toISOString().split('T')[0];
-                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + 1);
+                if (m.direction === 'INBOUND') {
+                    totalWaReplies++;
+                } else {
+                    totalWaReachouts++;
+                }
+            } else if (ch === 'VOICE') {
+                activityVoiceCount++;
+            } else if (ch === 'SMS') {
+                activitySmsCount++;
             }
         });
 
-        const dailyAcquisitionArr = Array.from(dailyMap.entries())
+        // Supplement from customer columns if messages count is low
+        if (activityEmailCount === 0) {
+            allCustomers.forEach(c => {
+                if (c.email_1 || c.email_2) activityEmailCount++;
+            });
+        }
+        if (activityWaCount === 0) {
+            allCustomers.forEach(c => {
+                if (c.WA_text || c.whatsapp_1) {
+                    activityWaCount++;
+                    totalWaReachouts++;
+                    if (c.WA_replied && String(c.WA_replied).toLowerCase() !== 'no') {
+                        totalWaReplies++;
+                    }
+                }
+            });
+        }
+
+        const dailyAcquisition = Array.from(dailyMap.entries())
             .map(([date, leads]) => ({ date, leads }))
             .sort((a, b) => a.date.localeCompare(b.date));
 
-        return NextResponse.json({
+        const metrics: MasterMetrics = {
             totalLeads,
-            oldestLeadDate: oldestLeadDate || '2026-09-01T13:32:28.286Z',
-            totalWaReachouts: activityWaCount,
+            oldestLeadDate,
+            totalWaReachouts,
             totalWaReplies,
-            totalVoiceCalls: 0,
+            totalVoiceCalls: activityVoiceCount,
             ownerVoiceCalls: 0,
             normalVapiCost: 0,
             ownerVapiCost: 0,
-            dailyAcquisition: dailyAcquisitionArr,
-            leadsDaily: dailyAcquisitionArr,
+            leadsDaily: dailyAcquisition,
+            dailyAcquisition,
             ownerWaReachouts: 0,
             ownerWaReplies: 0,
             activityEmailCount,
             activityWaCount,
+            activityVoiceCount,
+            activitySmsCount,
+            activityRepliesCount,
+            activityTotalCount: messageTotal || (activityEmailCount + activityWaCount + activityVoiceCount + activitySmsCount),
+        };
+
+        return NextResponse.json(metrics, {
+            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        });
+    } catch (error: any) {
+        console.error('Error in master metrics route:', error);
+        return NextResponse.json({
+            totalLeads: 0,
+            oldestLeadDate: null,
+            totalWaReachouts: 0,
+            totalWaReplies: 0,
+            totalVoiceCalls: 0,
+            ownerVoiceCalls: 0,
+            normalVapiCost: 0,
+            ownerVapiCost: 0,
+            leadsDaily: [],
+            dailyAcquisition: [],
+            ownerWaReachouts: 0,
+            ownerWaReplies: 0,
+            activityEmailCount: 0,
+            activityWaCount: 0,
             activityVoiceCount: 0,
             activitySmsCount: 0,
-            activityRepliesCount,
-            activityTotalCount: allCustomers.length,
-        }, { headers: { 'Cache-Control': 'no-store' } });
-    } catch (error) {
-        console.error('Error in master metrics route:', error);
-        return NextResponse.json(EMPTY);
+            activityRepliesCount: 0,
+            activityTotalCount: 0,
+        }, { status: 500 });
     }
 }
-
-

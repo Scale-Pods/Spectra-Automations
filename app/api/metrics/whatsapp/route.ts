@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { fetchMessages } from '@/lib/messages-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,22 +13,15 @@ export interface WhatsappMetrics {
     ownerReplies: number;
 }
 
-function checkIsNonEmpty(val: any): boolean {
-    if (val === null || val === undefined) return false;
-    const str = String(val).trim();
-    return str !== '' && str !== '[]' && str !== 'null' && str !== 'undefined';
-}
-
-function checkIsReplied(val: any): boolean {
-    if (val === null || val === undefined) return false;
-    if (Array.isArray(val)) return val.length > 0;
-    if (typeof val === 'object') return Object.keys(val).length > 0;
-    const str = String(val).trim().toLowerCase();
-    return str !== '' && str !== '[]' && str !== 'no' && str !== 'false' && str !== 'null' && str !== 'undefined';
-}
-
 export async function GET(request: NextRequest) {
     try {
+        // Fetch WhatsApp messages from public.messages table
+        const { messages } = await fetchMessages({
+            channel: 'WHATSAPP',
+            limit: 1000
+        });
+
+        // Also fetch customer table for fallback/supplement
         const { data: customers } = await supabaseAdmin
             .from('customers')
             .select('*');
@@ -36,21 +30,39 @@ export async function GET(request: NextRequest) {
         let totalReplies = 0;
         const dailyMap: Record<string, { reachouts: number; replies: number }> = {};
 
-        (customers || []).forEach(c => {
-            const hasReachout = checkIsNonEmpty(c.WA_text) || checkIsNonEmpty(c.whatsapp_1) || checkIsNonEmpty(c.whatsapp_2) || checkIsNonEmpty(c.whatsapp_3) || checkIsNonEmpty(c.whatsapp_4);
-            const isReplied = checkIsReplied(c.WA_replied);
+        // 1. Process public.messages
+        messages.forEach(m => {
+            const dt = m.sent_or_received_at || m.created_at;
+            const dayKey = dt ? new Date(dt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+            if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
 
-            if (hasReachout) totalReachouts++;
-            if (isReplied) totalReplies++;
-
-            const dt = c.last_contacted_at || c.created_at || c.eworks_created_on;
-            if (dt) {
-                const dayKey = new Date(dt).toISOString().slice(0, 10);
-                if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
-                if (hasReachout) dailyMap[dayKey].reachouts++;
-                if (isReplied) dailyMap[dayKey].replies++;
+            if (m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'))) {
+                totalReplies++;
+                dailyMap[dayKey].replies++;
+            } else {
+                totalReachouts++;
+                dailyMap[dayKey].reachouts++;
             }
         });
+
+        // 2. Supplement from customers table if messages table count is small
+        if (totalReachouts === 0 && customers && customers.length > 0) {
+            customers.forEach(c => {
+                const hasReachout = c.WA_text || c.whatsapp_1 || c.whatsapp_2;
+                const isReplied = c.WA_replied && String(c.WA_replied).toLowerCase() !== 'no';
+
+                if (hasReachout) totalReachouts++;
+                if (isReplied) totalReplies++;
+
+                const dt = c.last_contacted_at || c.created_at || c.eworks_created_on;
+                if (dt) {
+                    const dayKey = new Date(dt).toISOString().slice(0, 10);
+                    if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
+                    if (hasReachout) dailyMap[dayKey].reachouts++;
+                    if (isReplied) dailyMap[dayKey].replies++;
+                }
+            });
+        }
 
         const dailyTrend = Object.entries(dailyMap)
             .sort(([a], [b]) => a.localeCompare(b))
@@ -59,7 +71,7 @@ export async function GET(request: NextRequest) {
         const replyRate = totalReachouts > 0 ? Math.round((totalReplies / totalReachouts) * 100) / 100 : 0;
 
         return NextResponse.json({
-            totalReachouts,
+            totalReachouts: totalReachouts,
             totalReplies,
             replyRate,
             dailyTrend,

@@ -102,54 +102,30 @@ export default function WhatsappDashboardPage() {
             const uniqueLeads = new Set<string>();
 
             mergedLeads.forEach(lead => {
-                const dateSource = lead.wp1_parsed_date || lead.created_at || lead["Created At"] || lead['1st_wa_ts'];
-                if (dateSource) {
-                    const parsed = parseDate(dateSource);
-                    if (parsed && !inRange(parsed.getTime())) return;
-                }
+                const key = lead.recipient_address || lead.phone || lead.id;
+                if (key) uniqueLeads.add(key);
 
-                const rawPhone = lead.phone_e164 || lead.phone || lead.Phone || lead.mobile_raw || '';
-                const cleanPhone = String(rawPhone).replace(/\D/g, '');
-                const key = cleanPhone || String(lead.id || lead.Name || lead.name || '').trim();
+                const msgs: any[] = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
+                
+                if (msgs.length > 0) {
+                    const outboundCount = msgs.filter(m => m.direction === 'OUTBOUND').length;
+                    sentCount += outboundCount > 0 ? outboundCount : msgs.length;
+                    
+                    const hasInbound = msgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes';
+                    if (hasInbound) totalReplies++;
 
-                const text1 = lead.whatsapp_1 ? String(lead.whatsapp_1).trim() : '';
-                const text2 = lead.whatsapp_2 ? String(lead.whatsapp_2).trim() : '';
-                const text3 = lead.whatsapp_3 ? String(lead.whatsapp_3).trim() : '';
-                const text4 = lead.whatsapp_4 ? String(lead.whatsapp_4).trim() : '';
-                const waText = lead.WA_text ? String(lead.WA_text).trim() : '';
-
-                const hasWaText = waText !== '' || text1 !== '' || text2 !== '' || text3 !== '' || text4 !== '';
-
-                const rVal = lead.WA_replied || lead.WP_Replied_track || lead.whatsapp_replied || lead.replied;
-                const hasReplied = !!(rVal && String(rVal).trim() && !["no", "none", "0", "false", "null"].includes(String(rVal).trim().toLowerCase()));
-
-                if (hasWaText || hasReplied) {
-                    if (key) uniqueLeads.add(key);
-
-                    let msgCount = 0;
-                    if (waText) {
-                        const turns = waText.match(/(User|AI|Agent|Bot|Template)\s*(?:\[[^\]]+\])?\s*:/gi);
-                        msgCount = turns ? turns.length : 1;
-                    } else {
-                        if (text1) msgCount++;
-                        if (text2) msgCount++;
-                        if (text3) msgCount++;
-                        if (text4) msgCount++;
-                    }
-
-                    sentCount += Math.max(1, msgCount);
-
-                    if (hasReplied) totalReplies++;
-
-                    if (dateSource) {
-                        const parsed = parseDate(dateSource);
-                        if (parsed) {
-                            const dayKey = parsed.toISOString().slice(0, 10);
+                    msgs.forEach(m => {
+                        const dt = m.sent_or_received_at || m.created_at;
+                        if (dt) {
+                            const dayKey = new Date(dt).toISOString().slice(0, 10);
                             if (!dailyMap[dayKey]) dailyMap[dayKey] = { sent: 0, replied: 0 };
-                            dailyMap[dayKey].sent += Math.max(1, msgCount);
-                            if (hasReplied) dailyMap[dayKey].replied++;
+                            if (m.direction === 'OUTBOUND') dailyMap[dayKey].sent++;
+                            if (m.direction === 'INBOUND') dailyMap[dayKey].replied++;
                         }
-                    }
+                    });
+                } else {
+                    sentCount += lead.whatsapp_count || 1;
+                    if (lead.replied === 'yes') totalReplies++;
                 }
             });
 

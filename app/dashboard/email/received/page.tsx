@@ -26,52 +26,106 @@ import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 
 export default function ReceivedEmailsPage() {
     const { leads: allLeads, loadingLeads } = useData();
-    const loading = loadingLeads;
+    const [apiEmailLeads, setApiEmailLeads] = useState<any[]>([]);
+    const [loadingApi, setLoadingApi] = useState(false);
     const [loopFilter, setLoopFilter] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
     const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 90), to: new Date() });
     const [sortBy, setSortBy] = useState("newest");
 
+    useEffect(() => {
+        const fetchEmailThreads = async () => {
+            setLoadingApi(true);
+            try {
+                const res = await fetch('/api/email');
+                if (res.ok) {
+                    const data = await res.json();
+                    setApiEmailLeads(data.email_leads || []);
+                }
+            } catch (err) {
+                console.error("Error fetching email threads:", err);
+            } finally {
+                setLoadingApi(false);
+            }
+        };
+        fetchEmailThreads();
+    }, []);
+
+    const loading = loadingLeads || loadingApi;
+
     const replies = useMemo(() => {
         const result: any[] = [];
-        allLeads.forEach((lead: any) => {
-            const hasReply = lead.email_reply &&
-                String(JSON.stringify(lead.email_reply)) !== '[]' &&
-                String(JSON.stringify(lead.email_reply)) !== 'null' &&
-                String(JSON.stringify(lead.email_reply)) !== '""';
 
-            if (hasReply) {
-                const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
-                const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
-                let content = "Inbound email response received.";
-                if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
-                    const lastItem = lead.email_reply[lead.email_reply.length - 1];
-                    content = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
-                } else if (typeof lead.email_reply === 'object') {
-                    content = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
-                } else {
-                    content = String(lead.email_reply);
-                }
-                const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
-                const timestamp = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+        // 1. Process from /api/email (public.messages table)
+        if (apiEmailLeads && apiEmailLeads.length > 0) {
+            apiEmailLeads.forEach((lead: any) => {
+                const messagesList = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
+                messagesList.forEach((m: any, mIdx: number) => {
+                    if (m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'))) {
+                        const senderEmail = m.sender_address || lead.recipient_address || "Lead";
+                        const leadName = lead.full_name || lead.customer_name || lead.name || senderEmail;
+                        const dateRaw = m.sent_or_received_at || m.created_at || lead.created_at;
+                        const timestamp = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
 
-                result.push({
-                    id: lead.id || `reply-${Math.random()}`,
-                    sender: senderEmail,
-                    senderName: leadName,
-                    status: "Replied",
-                    subject: lead.subject || "Re: Campaign Outreach",
-                    timestamp,
-                    content,
-                    originalDate: dateRaw || new Date().toISOString(),
-                    loop: lead.source_loop || lead.source_table || "Email Campaign",
-                    repliedToStep: "Outreach Email",
-                    rawLead: lead
+                        result.push({
+                            id: m.id || `${lead.id}-inbound-${mIdx}`,
+                            sender: senderEmail,
+                            senderName: leadName,
+                            status: "Replied",
+                            subject: m.subject || lead.subject || "Re: Campaign Outreach",
+                            timestamp,
+                            content: m.body_text || m.content || m.subject || "Inbound response received.",
+                            originalDate: dateRaw || new Date().toISOString(),
+                            loop: "Email Campaign",
+                            repliedToStep: "Outreach Email",
+                            rawLead: lead
+                        });
+                    }
                 });
-            }
-        });
+            });
+        }
+
+        // 2. Fallback to allLeads if no inbound messages found from API
+        if (result.length === 0) {
+            allLeads.forEach((lead: any) => {
+                const hasReply = lead.email_reply &&
+                    String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                    String(JSON.stringify(lead.email_reply)) !== 'null' &&
+                    String(JSON.stringify(lead.email_reply)) !== '""';
+
+                if (hasReply) {
+                    const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
+                    const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
+                    let content = "Inbound email response received.";
+                    if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
+                        const lastItem = lead.email_reply[lead.email_reply.length - 1];
+                        content = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
+                    } else if (typeof lead.email_reply === 'object') {
+                        content = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
+                    } else {
+                        content = String(lead.email_reply);
+                    }
+                    const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
+                    const timestamp = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+
+                    result.push({
+                        id: lead.id || `reply-${Math.random()}`,
+                        sender: senderEmail,
+                        senderName: leadName,
+                        status: "Replied",
+                        subject: lead.subject || "Re: Campaign Outreach",
+                        timestamp,
+                        content,
+                        originalDate: dateRaw || new Date().toISOString(),
+                        loop: lead.source_loop || lead.source_table || "Email Campaign",
+                        repliedToStep: "Outreach Email",
+                        rawLead: lead
+                    });
+                }
+            });
+        }
         return result;
-    }, [allLeads]);
+    }, [allLeads, apiEmailLeads]);
 
 
 

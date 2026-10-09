@@ -16,7 +16,6 @@ export default function WhatsappSentPage() {
     const { leads: allLeads, loadingLeads } = useData();
     const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 7), to: new Date() });
     const [messages, setMessages] = useState<any[]>([]);
-    const loading = loadingLeads;
     const [searchQuery, setSearchQuery] = useState("");
     const [stats, setStats] = useState({
         total: 0,
@@ -24,57 +23,57 @@ export default function WhatsappSentPage() {
         read: 0,
         failed: 0
     });
+    const [apiLoading, setApiLoading] = useState(false);
+    const loading = loadingLeads || apiLoading;
 
     useEffect(() => {
         const fetchData = async () => {
-            if (loadingLeads) return;
+            setApiLoading(true);
             try {
-                // We still fetch templates as they're small and not in global context yet
-                const templatesRes = await fetch('/api/templates');
-                const templates = templatesRes.ok ? await templatesRes.json() : [];
+                const res = await fetch('/api/activity?channel=WHATSAPP&limit=500');
+                let actMessages: any[] = [];
+                if (res.ok) {
+                    const data = await res.json();
+                    actMessages = data.messages || [];
+                }
 
                 const waMessages: any[] = [];
                 let deliveredCount = 0;
                 let readCount = 0;
+                let failedCount = 0;
 
                 // Apply Date Filtering
-                const leads = allLeads.filter((lead: any) => {
+                const filtered = actMessages.filter((msg: any) => {
                     if (!dateRange?.from) return true;
-                    if (!lead.created_at) return false;
+                    const dateStr = msg.sent_or_received_at || msg.created_at;
+                    if (!dateStr) return false;
 
-                    const leadDate = new Date(lead.created_at);
+                    const msgDate = new Date(dateStr);
                     const from = new Date(dateRange.from);
                     from.setHours(0, 0, 0, 0);
                     const to = dateRange.to ? new Date(dateRange.to) : from;
                     to.setHours(23, 59, 59, 999);
 
-                    return leadDate >= from && leadDate <= to;
+                    return msgDate >= from && msgDate <= to;
                 });
 
-                leads.forEach((l: any) => {
-                    const lead = l as any;
-                    const stages = lead.stages_passed || [];
-                    stages.forEach((stage: string) => {
-                        if (stage.toLowerCase().includes("whatsapp")) {
-                            // Find matching template if any
-                            const template = templates.find((t: any) =>
-                                t.type === 'whatsapp' && (t.name === stage || stage.includes(t.name))
-                            );
+                filtered.forEach((m: any) => {
+                    const isOutbound = m.direction === 'OUTBOUND';
+                    const recipient = isOutbound ? m.recipient_address : m.sender_address;
+                    const st = (m.status || '').toLowerCase();
 
-                            const hasReplied = lead.whatsapp_replied && lead.whatsapp_replied !== "No" && lead.whatsapp_replied !== "none";
+                    if (st.includes('read')) readCount++;
+                    if (st.includes('delivered') || st.includes('sent')) deliveredCount++;
+                    if (st.includes('failed') || st.includes('error')) failedCount++;
 
-                            waMessages.push({
-                                id: `${lead.id}-${stage}-${Math.random()}`,
-                                recipient: lead.phone || lead.name || "Unknown",
-                                message: template ? template.body : `WhatsApp Message: ${stage}`,
-                                status: lead.status || (hasReplied ? "Read" : "Delivered"),
-                                time: lead.created_at ? new Date(lead.created_at).toLocaleTimeString() : "Unknown",
-                                rawDate: lead.created_at
-                            });
-
-                            if (hasReplied) readCount++;
-                            deliveredCount++;
-                        }
+                    waMessages.push({
+                        id: m.id,
+                        recipient: recipient || "WhatsApp Contact",
+                        message: m.body_text || m.subject || "WhatsApp Message",
+                        status: m.status || (m.direction === 'INBOUND' ? "Read" : "Delivered"),
+                        time: m.sent_or_received_at ? new Date(m.sent_or_received_at).toLocaleString() : "Recent",
+                        rawDate: m.sent_or_received_at || m.created_at,
+                        direction: m.direction
                     });
                 });
 
@@ -83,14 +82,16 @@ export default function WhatsappSentPage() {
                     total: waMessages.length,
                     delivered: deliveredCount,
                     read: readCount,
-                    failed: 0
+                    failed: failedCount
                 });
             } catch (e) {
                 console.error("WhatsApp sent processing error", e);
+            } finally {
+                setApiLoading(false);
             }
         };
         fetchData();
-    }, [dateRange, allLeads, loadingLeads]);
+    }, [dateRange]);
 
     const filteredMessages = messages.filter(msg =>
         msg.recipient.toLowerCase().includes(searchQuery.toLowerCase()) ||

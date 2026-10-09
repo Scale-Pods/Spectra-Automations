@@ -72,8 +72,8 @@ export default function EmailDashboardPage() {
     }, [allLeads, dateRange]);
 
     const metrics = useMemo(() => {
-        const totalSent = calculatedMetrics.totalSent;
-        const totalReplies = Math.max(calculatedMetrics.totalReplies, apiAnalytics?.totalReplies || 0);
+        const totalSent = apiAnalytics?.totalSent !== undefined ? apiAnalytics.totalSent : calculatedMetrics.totalSent;
+        const totalReplies = apiAnalytics?.totalReplies !== undefined ? apiAnalytics.totalReplies : calculatedMetrics.totalReplies;
         const totalLeads = calculatedMetrics.totalLeadsCount > 0 ? calculatedMetrics.totalLeadsCount : 549;
         const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : "0.0";
         
@@ -92,40 +92,61 @@ export default function EmailDashboardPage() {
 
     const receivedEmails = useMemo(() => {
         const replies: any[] = [];
-        allLeads.forEach((lead: any) => {
-            const hasReply = lead.email_reply &&
-                String(JSON.stringify(lead.email_reply)) !== '[]' &&
-                String(JSON.stringify(lead.email_reply)) !== 'null' &&
-                String(JSON.stringify(lead.email_reply)) !== '""';
-
-            if (hasReply) {
-                const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
-                const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
-                let preview = "Inbound email response received.";
-                if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
-                    const lastItem = lead.email_reply[lead.email_reply.length - 1];
-                    preview = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
-                } else if (typeof lead.email_reply === 'object') {
-                    preview = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
-                } else {
-                    preview = String(lead.email_reply);
+        
+        // 1. Process messages returned from /api/email/analytics
+        if (apiAnalytics?.messages && Array.isArray(apiAnalytics.messages)) {
+            apiAnalytics.messages.forEach((m: any) => {
+                if (m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'))) {
+                    replies.push({
+                        id: m.id,
+                        lead_name: m.sender_address || m.recipient_address || "Email Lead",
+                        sender_email: m.sender_address || m.recipient_address || "Lead",
+                        subject: m.subject || "Inbound Email Response",
+                        preview: (m.body_text || m.subject || "Email response received.").substring(0, 150),
+                        date: m.sent_or_received_at ? format(new Date(m.sent_or_received_at), "yyyy-MM-dd HH:mm") : "Recent",
+                        leadId: m.customer_id || m.recipient_address
+                    });
                 }
-                const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
-                const dateStr = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+            });
+        }
 
-                replies.push({
-                    id: lead.id || `reply-${Math.random()}`,
-                    lead_name: leadName,
-                    sender_email: senderEmail,
-                    subject: lead.subject || "Re: Campaign Outreach",
-                    preview: String(preview).replace(/\\n/g, ' ').substring(0, 150),
-                    date: dateStr,
-                    leadId: lead.id
-                });
-            }
-        });
+        // 2. Fallback / supplement from allLeads
+        if (replies.length === 0) {
+            allLeads.forEach((lead: any) => {
+                const hasReply = lead.email_reply &&
+                    String(JSON.stringify(lead.email_reply)) !== '[]' &&
+                    String(JSON.stringify(lead.email_reply)) !== 'null' &&
+                    String(JSON.stringify(lead.email_reply)) !== '""';
+
+                if (hasReply) {
+                    const senderEmail = lead.email || lead.lead_email || lead.Email || 'Prospect';
+                    const leadName = lead.full_name || lead.customer_name || lead.name || 'Lead';
+                    let preview = "Inbound email response received.";
+                    if (Array.isArray(lead.email_reply) && lead.email_reply.length > 0) {
+                        const lastItem = lead.email_reply[lead.email_reply.length - 1];
+                        preview = lastItem.body_text || lastItem.content || lastItem.subject || JSON.stringify(lastItem);
+                    } else if (typeof lead.email_reply === 'object') {
+                        preview = lead.email_reply.body_text || lead.email_reply.content || JSON.stringify(lead.email_reply);
+                    } else {
+                        preview = String(lead.email_reply);
+                    }
+                    const dateRaw = lead.updated_at || lead.created_at || lead.eworks_created_on;
+                    const dateStr = dateRaw ? format(new Date(dateRaw), "yyyy-MM-dd HH:mm") : "Recent";
+
+                    replies.push({
+                        id: lead.id || `reply-${Math.random()}`,
+                        lead_name: leadName,
+                        sender_email: senderEmail,
+                        subject: lead.subject || "Re: Campaign Outreach",
+                        preview: String(preview).replace(/\\n/g, ' ').substring(0, 150),
+                        date: dateStr,
+                        leadId: lead.id
+                    });
+                }
+            });
+        }
         return replies.slice(0, 10);
-    }, [allLeads]);
+    }, [allLeads, apiAnalytics]);
 
     const chartData = useMemo(() => {
         return metrics.dailyChartData.map((item: any) => ({

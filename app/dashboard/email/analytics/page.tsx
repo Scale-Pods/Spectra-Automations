@@ -77,10 +77,10 @@ export default function EmailAnalyticsPage() {
     }, [allLeads, dateRange]);
 
     const analytics = useMemo(() => {
-        const totalSent = calculatedMetrics.totalSent;
+        const totalSent = apiAnalytics?.totalSent !== undefined ? apiAnalytics.totalSent : calculatedMetrics.totalSent;
         const totalEmails = calculatedMetrics.totalEmails;
-        const totalReplies = Math.max(calculatedMetrics.totalReplies, apiAnalytics?.totalReplies || 0);
-        const totalUnsubscribed = calculatedMetrics.totalUnsubscribed;
+        const totalReplies = apiAnalytics?.totalReplies !== undefined ? apiAnalytics.totalReplies : calculatedMetrics.totalReplies;
+        const totalUnsubscribed = apiAnalytics?.totalUnsubscribed !== undefined ? apiAnalytics.totalUnsubscribed : calculatedMetrics.totalUnsubscribed;
         const totalLeadsCount = calculatedMetrics.totalLeadsCount > 0 ? calculatedMetrics.totalLeadsCount : 549;
         const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : "0.0";
         const unsubRate = totalSent > 0 ? ((totalUnsubscribed / totalSent) * 100).toFixed(1) : "0.0";
