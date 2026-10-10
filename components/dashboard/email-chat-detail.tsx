@@ -206,11 +206,25 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
 
             // 2) Parse activity logs returned from API search
             actLogs.forEach(act => {
-                const msgs = parseEmailContent(act.content, act.note);
-                msgs.forEach(m => {
-                    if (act.created_at && !m.date) m.date = act.created_at;
-                });
-                parsedMsgs.push(...msgs);
+                if (act.direction === 'INBOUND' || act.direction === 'OUTBOUND') {
+                    const isUser = act.direction === 'INBOUND' || (act.status && String(act.status).toLowerCase().includes('reply'));
+                    const cleanText = cleanMessageContent(act.content || act.note || act.summary || '', isUser ? 'User Reply' : 'Email Sent');
+                    if (cleanText) {
+                        parsedMsgs.push({
+                            type: isUser ? 'user' : 'bot',
+                            content: cleanText,
+                            label: isUser ? 'Recipient Reply' : 'Outreach Email',
+                            date: act.created_at || null,
+                            sequence: parsedMsgs.length + 1
+                        });
+                    }
+                } else if (act.content || act.note) {
+                    const msgs = parseEmailContent(act.content, act.note);
+                    msgs.forEach(m => {
+                        if (act.created_at && !m.date) m.date = act.created_at;
+                    });
+                    parsedMsgs.push(...msgs);
+                }
             });
 
             // 3) Parse legacy column stages (Email_1 ... Email_10) if no messages found
@@ -240,14 +254,21 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                 }
             }
 
-            // Deduplicate messages by content
-            const seenContent = new Set<string>();
-            const uniqueMsgs = parsedMsgs.filter(m => {
-                const key = `${m.type}:${(m.content || '').trim()}`;
-                if (seenContent.has(key)) return false;
-                seenContent.add(key);
-                return true;
+            // Deduplicate messages by content text (preferring 'user' type if identical text exists as bot fallback)
+            const seenTextMap = new Map<string, any>();
+            parsedMsgs.forEach(m => {
+                const textKey = (m.content || '').trim().toLowerCase();
+                if (!textKey) return;
+                if (!seenTextMap.has(textKey)) {
+                    seenTextMap.set(textKey, m);
+                } else {
+                    const existing = seenTextMap.get(textKey);
+                    if (m.type === 'user' && existing.type === 'bot') {
+                        seenTextMap.set(textKey, m);
+                    }
+                }
             });
+            const uniqueMsgs = Array.from(seenTextMap.values());
 
             // Sort ascending by timestamp (earliest first, latest last)
             uniqueMsgs.sort((a, b) => {
@@ -282,12 +303,22 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (messages.length > 0) {
+            setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+        }
+    }, [messages]);
+
     const leadName = lead?.["Name"] || lead?.name || leadId || "Unknown Contact";
     const leadEmail = lead?.["Email"] || lead?.email || "";
     const subjectText = lead?.subject || lead?.Subject || initialLead?.subject || (messages && messages.length > 0 ? messages.find((m: any) => m.subject)?.subject : null) || "Email Service Outreach";
 
     return (
-        <div className="flex flex-col h-full bg-white text-slate-900 rounded-2xl overflow-hidden border border-slate-200 shadow-2xl">
+        <div className="flex flex-col h-[85vh] max-h-[85vh] w-full bg-white text-slate-900 rounded-2xl overflow-hidden border border-slate-200 shadow-2xl min-h-0">
             {/* Header */}
             <div className="flex items-center justify-between p-4 px-6 border-b border-slate-200 bg-slate-50/80 backdrop-blur-md shrink-0">
                 <div className="flex items-center gap-3">
@@ -339,7 +370,7 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
             </div>
 
             {/* Conversation Thread */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/60">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/60 min-h-0">
                 {loading ? (
                     <div className="flex items-center justify-center h-48 text-slate-400 text-sm">
                         <RefreshCw className="h-5 w-5 animate-spin mr-2 text-blue-500" /> Loading Email thread...
@@ -350,63 +381,66 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                         <span>No Email activity recorded for this contact yet.</span>
                     </div>
                 ) : (
-                    messages.map((msg, index) => {
-                        const isInbound = msg.type === 'user' || String(msg.direction || '').toUpperCase() === 'INBOUND';
-                        const text = msg.content;
-                        const formattedDate = msg.date
-                            ? new Date(msg.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
-                            : null;
+                    <>
+                        {messages.map((msg, index) => {
+                            const isInbound = msg.type === 'user' || String(msg.direction || '').toUpperCase() === 'INBOUND';
+                            const text = msg.content;
+                            const formattedDate = msg.date
+                                ? new Date(msg.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+                                : null;
 
-                        return (
-                            <div
-                                key={index}
-                                className={`flex items-end gap-3 ${isInbound ? 'justify-start' : 'justify-end'} my-3`}
-                            >
-                                {isInbound && (
-                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-xs font-bold shrink-0 mb-1 shadow-2xs">
-                                        <User className="h-4 w-4" />
-                                    </div>
-                                )}
-
+                            return (
                                 <div
-                                    className={`max-w-[80%] sm:max-w-[70%] p-4 text-xs sm:text-sm rounded-2xl shadow-xs transition-all ${
-                                        isInbound
-                                            ? 'bg-white text-slate-800 border border-slate-200/90 rounded-bl-xs'
-                                            : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-xs shadow-md'
-                                    }`}
+                                    key={index}
+                                    className={`flex items-end gap-3 ${isInbound ? 'justify-start' : 'justify-end'} my-3`}
                                 >
+                                    {isInbound && (
+                                        <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-xs font-bold shrink-0 mb-1 shadow-2xs">
+                                            <User className="h-4 w-4" />
+                                        </div>
+                                    )}
+
                                     <div
-                                        className={`flex items-center justify-between gap-3 mb-2 pb-1.5 border-b text-[11px] font-medium ${
+                                        className={`max-w-[80%] sm:max-w-[70%] p-4 text-xs sm:text-sm rounded-2xl shadow-xs transition-all ${
                                             isInbound
-                                                ? 'border-slate-100 text-slate-500'
-                                                : 'border-white/15 text-blue-100/90'
+                                                ? 'bg-white text-slate-800 border border-slate-200/90 rounded-bl-xs'
+                                                : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-xs shadow-md'
                                         }`}
                                     >
-                                        <span className={`flex items-center gap-1 font-semibold uppercase text-[10px] tracking-wider px-2 py-0.5 rounded-md ${
-                                            isInbound
-                                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                                : 'bg-white/15 text-white border border-white/20'
-                                        }`}>
-                                            {isInbound ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                                            {isInbound ? (msg.label || 'Recipient Reply') : (msg.label || 'Outreach Email')}
-                                        </span>
-                                        {formattedDate && (
-                                            <span className="font-mono text-[10px] opacity-80">
-                                                {formattedDate}
+                                        <div
+                                            className={`flex items-center justify-between gap-3 mb-2 pb-1.5 border-b text-[11px] font-medium ${
+                                                isInbound
+                                                    ? 'border-slate-100 text-slate-500'
+                                                    : 'border-white/15 text-blue-100/90'
+                                            }`}
+                                        >
+                                            <span className={`flex items-center gap-1 font-semibold uppercase text-[10px] tracking-wider px-2 py-0.5 rounded-md ${
+                                                isInbound
+                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                    : 'bg-white/15 text-white border border-white/20'
+                                            }`}>
+                                                {isInbound ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                                                {isInbound ? (msg.label || 'Recipient Reply') : (msg.label || 'Outreach Email')}
                                             </span>
-                                        )}
+                                            {formattedDate && (
+                                                <span className="font-mono text-[10px] opacity-80">
+                                                    {formattedDate}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="whitespace-pre-wrap leading-relaxed font-sans font-normal">{text}</p>
                                     </div>
-                                    <p className="whitespace-pre-wrap leading-relaxed font-sans font-normal">{text}</p>
-                                </div>
 
-                                {!isInbound && (
-                                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center text-xs font-bold shrink-0 mb-1 shadow-2xs">
-                                        <Bot className="h-4 w-4" />
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })
+                                    {!isInbound && (
+                                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center text-xs font-bold shrink-0 mb-1 shadow-2xs">
+                                            <Bot className="h-4 w-4" />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                        <div ref={messagesEndRef} />
+                    </>
                 )}
             </div>
         </div>

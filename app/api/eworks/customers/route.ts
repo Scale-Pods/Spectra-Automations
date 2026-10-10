@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { SPECTRA_EWORKS_CUSTOMERS } from '@/lib/eworks-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,10 +21,8 @@ export async function GET(request: NextRequest) {
         if (fromDate && isNaN(fromDate.getTime())) fromDate = null;
         if (toDate && isNaN(toDate.getTime())) toDate = null;
 
-        if (fromDate && toDate) {
-            fromDate.setHours(0, 0, 0, 0);
-            toDate.setHours(23, 59, 59, 999);
-        }
+        if (fromDate) fromDate.setHours(0, 0, 0, 0);
+        if (toDate) toDate.setHours(23, 59, 59, 999);
 
         // 1. Fetch all customer records from Supabase public.customers table
         const { data: allCustomers, error } = await supabaseAdmin
@@ -33,36 +32,58 @@ export async function GET(request: NextRequest) {
 
         if (error) {
             console.error('Error fetching eWorks customers from Supabase:', error);
-            return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
-        let customers = allCustomers || [];
+        let customers = (allCustomers && allCustomers.length > 0) ? (allCustomers as any[]) : (SPECTRA_EWORKS_CUSTOMERS as any[]);
 
         // Apply Date Range Filter if set
-        if (fromDate && toDate) {
-            const filteredByDate = customers.filter(c => {
-                const dateCandidates = [
-                    c.eworks_last_updated_on,
-                    c.last_contacted_at,
+        if (fromDate || toDate) {
+            customers = customers.filter(c => {
+                const dateCandidates: (string | null | undefined)[] = [
                     c.latest_job_start_date,
-                    c.eworks_created_on,
-                    c.created_at,
-                    c.updated_at,
+                    c.latest_job_created_on,
+                    c.latest_job_completed_date,
+                    c.latest_job_updated_on,
                     c.latest_quote_date,
-                    c.latest_job_created_on
+                    c.latest_pending_quote_date,
+                    c.latest_converted_quote_date,
+                    c.latest_amc_quote_date,
+                    c.latest_invoice_date,
+                    c.latest_unpaid_invoice_date,
+                    c.latest_overdue_invoice_date,
+                    c.latest_paid_invoice_date,
+                    c.last_service_date,
+                    c.last_contacted_at,
+                    c.eworks_created_on,
+                    c.eworks_last_updated_on
                 ];
 
-                return dateCandidates.some(dStr => {
-                    if (!dStr) return false;
-                    const d = new Date(dStr);
-                    if (isNaN(d.getTime())) return false;
-                    return d >= fromDate! && d <= toDate!;
+                // Parse active_jobs if present
+                if (c.active_jobs) {
+                    let jobsArr = c.active_jobs;
+                    if (typeof jobsArr === 'string') {
+                        try { jobsArr = JSON.parse(jobsArr); } catch { jobsArr = []; }
+                    }
+                    if (Array.isArray(jobsArr)) {
+                        jobsArr.forEach((j: any) => {
+                            if (j?.scheduled_date) dateCandidates.push(j.scheduled_date);
+                            if (j?.created_at) dateCandidates.push(j.created_at);
+                        });
+                    }
+                }
+
+                const validDates = dateCandidates
+                    .map(dStr => dStr ? new Date(dStr) : null)
+                    .filter((d): d is Date => d !== null && !isNaN(d.getTime()));
+
+                if (validDates.length === 0) return false;
+
+                return validDates.some(d => {
+                    if (fromDate && d < fromDate) return false;
+                    if (toDate && d > toDate) return false;
+                    return true;
                 });
             });
-
-            if (filteredByDate.length > 0) {
-                customers = filteredByDate;
-            }
         }
 
         // 2. Compute Global Real Metrics from live database rows

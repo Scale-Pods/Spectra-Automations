@@ -391,6 +391,16 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
         });
     }, [messages, lead]);
 
+    const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (messagesWithDates.length > 0) {
+            setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+        }
+    }, [messagesWithDates]);
+
     if (loading) {
         return (
             <div className="h-[500px] flex flex-col items-center justify-center space-y-4 text-[var(--label-tertiary)]">
@@ -456,65 +466,68 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                         <div className="text-[10px] text-[var(--label-tertiary)] font-bold">{messages.length} Messages</div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
                         {messagesWithDates.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-[var(--label-tertiary)] space-y-2">
                                 <MessageSquare className="h-10 w-10 opacity-20" />
                                 <p className="text-sm">No WhatsApp messages found in database.</p>
                             </div>
                         ) : (
-                            messagesWithDates.map((msg, idx) => {
-                                // Build delivery-status pill for outgoing messages
-                                let tsPill: React.ReactNode = null;
-                                if (msg.type === 'bot' && (msg as any).tsStatus) {
-                                    const raw = String((msg as any).tsStatus);
-                                    const label = raw.split(' - ')[0].trim();
-                                    const formatted = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
-                                    let cls = 'bg-emerald-500/30 text-emerald-100';
-                                    if (formatted.includes('Read')) cls = 'bg-blue-400/40 text-blue-100';
-                                    if (formatted.includes('Failed')) cls = 'bg-red-400/40 text-red-100';
-                                    if (formatted.includes('Sent')) cls = 'bg-white/20 text-emerald-50';
-                                    tsPill = (
-                                        <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${cls}`}>
-                                            {formatted}
-                                        </span>
-                                    );
-                                }
-
-                                return (
-                                    <div key={idx} className={`flex flex-col ${msg.type === 'user' ? 'items-start' : 'items-end'}`}>
-                                        <div className={`max-w-[85%] rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_8px_rgba(0,0,0,0.06)] ${msg.type === 'user'
-                                            ? 'bg-[var(--bg-app)] text-[var(--label-primary)] border border-[var(--separator)] rounded-tl-none'
-                                            : 'bg-emerald-600 text-white rounded-tr-none'
-                                            }`}>
-                                            <div className="flex items-center justify-between mb-2 gap-3">
-                                                <span className={`text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 ${msg.type === 'user' ? 'text-[var(--label-tertiary)]' : 'text-emerald-100'}`}>
-                                                    {msg.type === 'user' ? (
-                                                        <>
-                                                            <User className="h-3 w-3" />
-                                                            <span>{msg.label || 'User'}</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <Bot className="h-3 w-3" />
-                                                            <span>{msg.label || 'Spectra AI'}</span>
-                                                        </>
-                                                    )}
-                                                </span>
-                                                {tsPill}
-                                            </div>
-                                            <p className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                                                {msg.content}
-                                            </p>
-                                        </div>
-                                        {msg.date && (
-                                            <span className="text-[10px] text-[var(--label-tertiary)] mt-1 px-1">
-                                                {new Date(msg.date).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                            <>
+                                {messagesWithDates.map((msg, idx) => {
+                                    // Build delivery-status pill for outgoing messages
+                                    let tsPill: React.ReactNode = null;
+                                    if (msg.type === 'bot' && (msg as any).tsStatus) {
+                                        const raw = String((msg as any).tsStatus);
+                                        const label = raw.split(' - ')[0].trim();
+                                        const formatted = label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+                                        let cls = 'bg-emerald-500/30 text-emerald-100';
+                                        if (formatted.includes('Read')) cls = 'bg-blue-400/40 text-blue-100';
+                                        if (formatted.includes('Failed')) cls = 'bg-red-400/40 text-red-100';
+                                        if (formatted.includes('Sent')) cls = 'bg-white/20 text-emerald-50';
+                                        tsPill = (
+                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${cls}`}>
+                                                {formatted}
                                             </span>
-                                        )}
-                                    </div>
-                                );
-                            })
+                                        );
+                                    }
+
+                                    return (
+                                        <div key={idx} className={`flex flex-col ${msg.type === 'user' ? 'items-start' : 'items-end'}`}>
+                                            <div className={`max-w-[85%] rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_8px_rgba(0,0,0,0.06)] ${msg.type === 'user'
+                                                ? 'bg-[var(--bg-app)] text-[var(--label-primary)] border border-[var(--separator)] rounded-tl-none'
+                                                : 'bg-emerald-600 text-white rounded-tr-none'
+                                                }`}>
+                                                <div className="flex items-center justify-between mb-2 gap-3">
+                                                    <span className={`text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 ${msg.type === 'user' ? 'text-[var(--label-tertiary)]' : 'text-emerald-100'}`}>
+                                                        {msg.type === 'user' ? (
+                                                            <>
+                                                                <User className="h-3 w-3" />
+                                                                <span>{msg.label || 'User'}</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Bot className="h-3 w-3" />
+                                                                <span>{msg.label || 'Spectra AI'}</span>
+                                                            </>
+                                                        )}
+                                                    </span>
+                                                    {tsPill}
+                                                </div>
+                                                <p className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                                                    {msg.content}
+                                                </p>
+                                            </div>
+                                            {msg.date && (
+                                                <span className="text-[10px] text-[var(--label-tertiary)] mt-1 px-1">
+                                                    {new Date(msg.date).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                                <div ref={messagesEndRef} />
+                            </>
                         )}
                     </div>
                 </div>

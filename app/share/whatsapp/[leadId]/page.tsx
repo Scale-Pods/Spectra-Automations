@@ -148,10 +148,21 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
 
                 const allMessages: any[] = [];
                 for (const act of (data.activities || [])) {
-                    if (act.content) {
+                    if (act.direction === 'INBOUND' || act.direction === 'OUTBOUND') {
+                        const isUser = act.direction === 'INBOUND' || (act.status && String(act.status).toLowerCase().includes('reply'));
+                        allMessages.push({
+                            type: isUser ? 'user' : 'bot',
+                            content: act.content || act.note || act.summary || '',
+                            label: isUser ? 'USER' : (act.channel ? `META_${String(act.channel).toUpperCase()}` : 'META_WHATSAPP'),
+                            date: act.created_at || null,
+                            sequence: allMessages.length + 1,
+                            tsStatus: act.status || 'SENT'
+                        });
+                    } else if (act.content) {
                         const parsed = parseActivityContent(act.content, act.summary);
                         parsed.forEach(m => {
                             if (!m.date && act.created_at) m.date = act.created_at;
+                            if ((act as any).status) (m as any).tsStatus = (act as any).status;
                         });
                         allMessages.push(...parsed);
                     }
@@ -205,13 +216,13 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                 <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 overflow-hidden min-h-0">
 
                     {/* ── Chat Timeline (2/3 width) ── */}
-                    <div className="lg:col-span-2 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] h-full min-h-0">
-                        <div className="border-b border-white/10 p-3 px-4 flex justify-between items-center shrink-0">
-                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Conversation Timeline</h3>
+                    <div className="lg:col-span-2 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50/50 h-full min-h-0">
+                        <div className="border-b border-slate-200 p-3 px-4 flex justify-between items-center shrink-0 bg-white">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Conversation Timeline</h3>
                             <div className="text-[10px] text-slate-500 font-bold">{messages.length} Messages</div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-slate-50/30">
                             {loading ? (
                                 <div className="h-64 flex flex-col items-center justify-center gap-3 text-slate-400">
                                     <RefreshCw className="h-8 w-8 animate-spin text-emerald-500" />
@@ -228,26 +239,60 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     <p className="text-sm">No WhatsApp messages found for this contact.</p>
                                 </div>
                             ) : (
-                                messages.map((msg, idx) => (
-                                    <div key={idx} className={`flex flex-col ${msg.type === 'user' ? 'items-start' : 'items-end'}`}>
-                                        <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-md text-sm leading-relaxed ${msg.type === 'user'
-                                            ? 'bg-[#1a2035] text-white border border-white/10 rounded-tl-none'
-                                            : 'bg-emerald-600 text-white rounded-tr-none'}`}
-                                        >
-                                            <p className={`text-[10px] font-bold uppercase mb-1 ${msg.type === 'user' ? 'text-slate-400' : 'text-emerald-100'}`}>
-                                                {msg.type === 'user'
-                                                    ? <span className="flex items-center gap-1"><User className="h-3 w-3" />Contact</span>
-                                                    : <span className="flex items-center gap-1"><Bot className="h-3 w-3" />Agent</span>}
-                                            </p>
-                                            <p className="whitespace-pre-wrap">{msg.content}</p>
-                                        </div>
-                                        {msg.date && (
-                                            <span className="text-[10px] text-slate-500 mt-1 px-1">
-                                                {new Date(msg.date).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                                messages.map((msg, idx) => {
+                                    let tsPill: React.ReactNode = null;
+                                    if (msg.type === 'bot' && (msg as any).tsStatus) {
+                                        const rawStatus = String((msg as any).tsStatus).toUpperCase();
+                                        let cls = 'bg-emerald-500/30 text-emerald-100';
+                                        if (rawStatus.includes('READ')) cls = 'bg-blue-400/40 text-blue-100';
+                                        if (rawStatus.includes('FAILED')) cls = 'bg-red-400/40 text-red-100';
+                                        if (rawStatus.includes('DELIVERED')) cls = 'bg-emerald-400/40 text-emerald-100';
+                                        if (rawStatus.includes('SENT')) cls = 'bg-white/20 text-emerald-50';
+                                        tsPill = (
+                                            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${cls}`}>
+                                                {rawStatus}
                                             </span>
-                                        )}
-                                    </div>
-                                ))
+                                        );
+                                    }
+
+                                    return (
+                                        <div key={idx} className={`flex flex-col ${msg.type === 'user' ? 'items-start' : 'items-end'}`}>
+                                            <div className={`max-w-[85%] rounded-2xl p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_8px_rgba(0,0,0,0.06)] ${
+                                                msg.type === 'user'
+                                                    ? 'bg-[#f8fafc] text-slate-900 border border-slate-200/80 rounded-tl-none'
+                                                    : 'bg-emerald-600 text-white rounded-tr-none'
+                                                }`}
+                                            >
+                                                <div className="flex items-center justify-between mb-2 gap-3">
+                                                    <span className={`text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 ${
+                                                        msg.type === 'user' ? 'text-slate-500' : 'text-emerald-100'
+                                                    }`}>
+                                                        {msg.type === 'user' ? (
+                                                            <>
+                                                                <User className="h-3 w-3" />
+                                                                <span>{msg.label || 'USER'}</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Bot className="h-3 w-3" />
+                                                                <span>{msg.label || 'META_WHATSAPP'}</span>
+                                                            </>
+                                                        )}
+                                                    </span>
+                                                    {tsPill}
+                                                </div>
+                                                <p className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                                                    {msg.content}
+                                                </p>
+                                            </div>
+                                            {msg.date && (
+                                                <span className="text-[10px] text-slate-500 mt-1 px-1">
+                                                    {new Date(msg.date).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                                                </span>
+                                            )}
+                                        </div>
+                                    );
+                                })
                             )}
                         </div>
                     </div>
@@ -256,15 +301,15 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                     <div className="lg:col-span-1 flex flex-col gap-4 overflow-y-auto pb-2">
 
                         {/* Lead Information Card */}
-                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-4">
                                 <User className="h-4 w-4 text-slate-400" /> Lead Information
                             </h3>
 
                             {loading ? (
                                 <div className="space-y-3">
                                     {[1, 2, 3].map(i => (
-                                        <div key={i} className="h-8 rounded-lg bg-white/5 animate-pulse" />
+                                        <div key={i} className="h-8 rounded-lg bg-slate-100 animate-pulse" />
                                     ))}
                                 </div>
                             ) : lead ? (
@@ -272,10 +317,10 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
 
                                     {/* Lead Name & ID */}
                                     <div>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Customer Profile</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Customer Profile</p>
                                         <p className="font-bold text-base text-slate-900">{lead.name || 'WhatsApp Contact'}</p>
                                         {lead.eworks_customer_id && (
-                                            <span className="inline-block text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded mt-1">
+                                            <span className="inline-block text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded mt-1 font-semibold">
                                                 ID: #{lead.eworks_customer_id}
                                             </span>
                                         )}
@@ -283,7 +328,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
 
                                     {/* Contact Info */}
                                     <div>
-                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Contact Details</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Contact Details</p>
                                         <p className="font-medium text-slate-800 font-mono text-xs">{lead.phone || decodedLeadId}</p>
                                         {lead.email && <p className="text-xs text-slate-600 mt-0.5">{lead.email}</p>}
                                         {lead.address && <p className="text-xs text-slate-500 mt-1">{lead.address}</p>}
@@ -312,7 +357,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {/* Status */}
                                     {lead.status && (
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Status</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Status</p>
                                             <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${getStatusStyle(lead.status)}`}>
                                                 {lead.status}
                                             </span>
@@ -322,7 +367,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {/* Source Table */}
                                     {lead.source_table && (
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Source Table</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Source Table</p>
                                             <p className="text-xs font-bold text-blue-600 flex items-center gap-1">
                                                 <Database className="h-3 w-3" />
                                                 {lead.source_table}
@@ -333,7 +378,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {/* Action Type */}
                                     {lead.action_type && (
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Action Type</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Action Type</p>
                                             <p className="text-xs font-bold text-purple-600 flex items-center gap-1">
                                                 <Zap className="h-3 w-3" />
                                                 {lead.action_type}
@@ -344,7 +389,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {/* Lead Temperature */}
                                     {lead.lead_temp && (
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Lead Temperature</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Lead Temperature</p>
                                             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${getTempStyle(lead.lead_temp)}`}>
                                                 <ThermometerSun className="h-3 w-3" />
                                                 {lead.lead_temp}
@@ -355,7 +400,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     {/* Summary */}
                                     {lead.summary && (
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Summary</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Summary</p>
                                             <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">{lead.summary}</p>
                                         </div>
                                     )}
@@ -366,18 +411,18 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                         </div>
 
                         {/* Activity Stats Card */}
-                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-                            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-4">
                                 <Activity className="h-4 w-4 text-slate-400" /> Activity Stats
                             </h3>
                             <div className="space-y-2">
                                 {[
-                                    { label: 'Total Messages', value: messages.length, icon: MessageSquare, color: 'text-white' },
-                                    { label: 'Incoming', value: incoming, icon: User, color: 'text-emerald-400' },
-                                    { label: 'Outgoing', value: outgoing, icon: Bot, color: 'text-blue-400' },
+                                    { label: 'Total Messages', value: messages.length, icon: MessageSquare, color: 'text-slate-900' },
+                                    { label: 'Incoming', value: incoming, icon: User, color: 'text-emerald-600' },
+                                    { label: 'Outgoing', value: outgoing, icon: Bot, color: 'text-blue-600' },
                                 ].map(({ label, value, icon: Icon, color }) => (
-                                    <div key={label} className="flex items-center justify-between p-2.5 px-3 rounded-lg bg-white/5 border border-white/[0.06]">
-                                        <div className="flex items-center gap-2 text-slate-400">
+                                    <div key={label} className="flex items-center justify-between p-2.5 px-3 rounded-lg bg-slate-50 border border-slate-100">
+                                        <div className="flex items-center gap-2 text-slate-500">
                                             <Icon className="h-3.5 w-3.5" />
                                             <span className="text-[10px] font-bold uppercase tracking-wide">{label}</span>
                                         </div>

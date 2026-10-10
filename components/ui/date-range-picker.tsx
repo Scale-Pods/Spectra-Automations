@@ -131,6 +131,7 @@ export function DateRangePicker({
         setDate(undefined);
         setTempDate(undefined);
         setTempLabel(undefined);
+        setOpen(false);
         if (onUpdate) {
             onUpdate({ range: undefined, label: undefined });
         }
@@ -144,11 +145,11 @@ export function DateRangePicker({
                         id="date"
                         variant={"outline"}
                         className={cn(
-                            "w-[260px] justify-start text-left font-normal bg-[var(--glass-fill)] border-[var(--separator)] text-[var(--label-primary)] hover:bg-[var(--fill-tertiary)] rounded-[10px] h-10",
-                            !date && "text-[var(--label-tertiary)]"
+                            "w-[260px] justify-start text-left font-normal bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 hover:text-slate-900 rounded-[10px] h-10 shadow-sm transition-all",
+                            !date && "text-slate-400"
                         )}
                     >
-                        <CalendarIcon className="mr-2 h-4 w-4 text-[var(--blue)]" />
+                        <CalendarIcon className="mr-2 h-4 w-4 text-violet-600" />
                         {date?.from ? (
                             date.to ? (
                                 <>
@@ -163,24 +164,37 @@ export function DateRangePicker({
                         )}
                     </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 bg-transparent border-none shadow-none" align="end">
-                    <div className="flex rounded-[20px] bg-[var(--glass-fill)] backdrop-blur-[60px] shadow-[0_8px_16px_rgba(0,0,0,0.16),0_32px_64px_rgba(0,0,0,0.32)] outline outline-1 outline-[var(--glass-border)] overflow-hidden">
-                        <div className="p-2.5 border-r border-[var(--separator)] w-[160px]">
-                            <div className="space-y-0.5">
-                                {presets.map((preset) => (
+                <PopoverContent className="w-auto p-0 bg-transparent border-none shadow-none z-50" align="end">
+                    <div className="flex rounded-[20px] bg-white border border-slate-200/90 shadow-2xl overflow-hidden">
+                        <div className="p-2.5 border-r border-slate-200 w-[165px] bg-slate-50/80">
+                            <div className="space-y-1">
+                                {presets.map((preset) => {
+                                    const isSelected = tempLabel === preset.label;
+                                    return (
+                                        <Button
+                                            key={preset.label}
+                                            variant="ghost"
+                                            className={cn(
+                                                "w-full justify-start text-[13px] h-8 rounded-lg transition-all px-3 font-medium",
+                                                isSelected
+                                                    ? "bg-violet-600 text-white font-semibold hover:bg-violet-700 hover:text-white shadow-sm"
+                                                    : "text-slate-700 hover:text-slate-900 hover:bg-slate-200/70"
+                                            )}
+                                            onClick={() => handlePresetChange(preset.label)}
+                                        >
+                                            {preset.label}
+                                        </Button>
+                                    );
+                                })}
+                                <div className="pt-2 mt-2 border-t border-slate-200">
                                     <Button
-                                        key={preset.label}
                                         variant="ghost"
-                                        className="w-full justify-start font-normal text-[14px] h-8 rounded-[8px]"
-                                        onClick={() => handlePresetChange(preset.label)}
-                                    >
-                                        {preset.label}
-                                    </Button>
-                                ))}
-                                <div className="pt-2 mt-2 border-t border-[var(--separator)]">
-                                    <Button
-                                        variant="ghost"
-                                        className="w-full justify-start font-normal text-[14px] h-8 text-[var(--label-secondary)] hover:text-[var(--label-primary)] rounded-[8px]"
+                                        className={cn(
+                                            "w-full justify-start text-[13px] h-8 rounded-lg transition-all px-3 font-medium",
+                                            tempLabel === "Custom Range"
+                                                ? "bg-violet-600 text-white font-semibold hover:bg-violet-700 hover:text-white shadow-sm"
+                                                : "text-slate-700 hover:text-slate-900 hover:bg-slate-200/70"
+                                        )}
                                         onClick={() => setTempLabel("Custom Range")}
                                     >
                                         Custom Range
@@ -188,7 +202,7 @@ export function DateRangePicker({
                                 </div>
                             </div>
                         </div>
-                        <div className="p-0">
+                        <div className="p-1 bg-white">
                             <Calendar
                                 initialFocus
                                 mode="range"
@@ -202,14 +216,14 @@ export function DateRangePicker({
                             />
                         </div>
                     </div>
-                    <div className="p-3 flex items-center justify-end gap-2 mt-1 rounded-[14px] bg-[var(--glass-fill)] backdrop-blur-[40px] shadow-[var(--glass-shadow)] outline outline-1 outline-[var(--glass-border)]">
-                        <Button variant="ghost" size="sm" onClick={handleClear} className="h-8 px-4 text-[var(--red)] hover:bg-[rgba(255,59,48,0.1)] mr-auto font-medium rounded-[8px]">
+                    <div className="p-3 flex items-center justify-end gap-2 mt-1.5 rounded-[16px] bg-white shadow-xl border border-slate-200">
+                        <Button variant="ghost" size="sm" onClick={handleClear} className="h-8 px-4 text-rose-600 hover:bg-rose-50 hover:text-rose-700 mr-auto font-medium rounded-lg">
                             Clear
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={handleCancel} className="h-8 px-4 text-[var(--label-secondary)] hover:text-[var(--label-primary)] font-medium rounded-[8px]">
+                        <Button variant="ghost" size="sm" onClick={handleCancel} className="h-8 px-4 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium rounded-lg">
                             Cancel
                         </Button>
-                        <Button size="sm" onClick={handleApply} className="h-8 px-4 bg-[var(--blue)] hover:opacity-90 text-white font-medium rounded-[8px]">
+                        <Button size="sm" onClick={handleApply} className="h-8 px-4 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-lg shadow-sm">
                             Apply
                         </Button>
                     </div>

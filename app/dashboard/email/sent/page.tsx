@@ -38,6 +38,12 @@ import { useData } from "@/context/DataContext";
 import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 import { LMLoader } from "@/components/spectra-loader";
 import { EmailChatDetail } from "@/components/dashboard/email-chat-detail";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 
 const ITEMS_PER_PAGE = 7;
 
@@ -359,23 +365,20 @@ export default function SentEmailsPage() {
             )}
 
             {/* Email Chat Detail Modal Overlay */}
-            {selectedLeadItem && (
-                <div
-                    className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150 cursor-pointer"
-                    onClick={() => setSelectedLeadItem(null)}
-                >
-                    <div
-                        className="w-full max-w-4xl h-[88vh] rounded-2xl overflow-hidden shadow-2xl transition-all cursor-default"
-                        onClick={(e) => e.stopPropagation()}
-                    >
+            <Dialog open={!!selectedLeadItem} onOpenChange={(open) => { if (!open) setSelectedLeadItem(null); }}>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden p-0 border-none bg-transparent shadow-none [&>button]:hidden">
+                    <DialogHeader className="sr-only">
+                        <DialogTitle>Email Thread Detail</DialogTitle>
+                    </DialogHeader>
+                    {selectedLeadItem && (
                         <EmailChatDetail
                             leadId={selectedLeadItem.id}
                             initialLead={selectedLeadItem.initialLead}
                             onClose={() => setSelectedLeadItem(null)}
                         />
-                    </div>
-                </div>
-            )}
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
