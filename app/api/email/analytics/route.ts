@@ -24,6 +24,9 @@ export async function GET(request: Request) {
         let totalSent = 0;
         let totalReplies = 0;
         let totalUnsubscribed = 0;
+        const contactedLeads = new Set<string>();
+        const repliedLeads = new Set<string>();
+        const contactedWhoReplied = new Set<string>();
         const dailyMap: Record<string, { date: string; sent: number; replies: number }> = {};
 
         // 1. Process public.messages
@@ -35,12 +38,17 @@ export async function GET(request: Request) {
                 dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
             }
 
-            if (m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'))) {
+            const isReply = m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
+            const leadKey = m.customer_id || (isReply ? m.sender_address : m.recipient_address);
+
+            if (isReply) {
                 totalReplies++;
                 dailyMap[dateKey].replies++;
+                if (leadKey) repliedLeads.add(leadKey);
             } else {
                 totalSent++;
                 dailyMap[dateKey].sent++;
+                if (leadKey) contactedLeads.add(leadKey);
             }
 
             const raw = parseRawPayload(m.raw_payload);
@@ -49,11 +57,20 @@ export async function GET(request: Request) {
             }
         });
 
+        // Track contacted leads who replied
+        contactedLeads.forEach(id => {
+            if (repliedLeads.has(id)) {
+                contactedWhoReplied.add(id);
+            }
+        });
+
         // 2. Supplement from customers table if messages table count is small
         if (totalSent === 0 && customerRows && customerRows.length > 0) {
             customerRows.forEach((c: any) => {
+                let sentCount = 0;
                 ['email_1', 'email_2'].forEach(col => {
                     if (c[col] && String(c[col]).trim() !== '') {
+                        sentCount++;
                         totalSent++;
                         const dateStr = c.created_at || c.eworks_created_on;
                         if (dateStr) {
@@ -64,8 +81,16 @@ export async function GET(request: Request) {
                     }
                 });
 
+                if (sentCount > 0) {
+                    contactedLeads.add(c.id);
+                }
+
                 if (c.email_reply && String(c.email_reply).trim() !== '' && String(c.email_reply).toLowerCase() !== 'no') {
                     totalReplies++;
+                    repliedLeads.add(c.id);
+                    if (sentCount > 0) {
+                        contactedWhoReplied.add(c.id);
+                    }
                 }
                 if (c.email_unsubscribed === true) {
                     totalUnsubscribed++;
@@ -73,14 +98,35 @@ export async function GET(request: Request) {
             });
         }
 
+        const totalUniqueLeadContacted = contactedLeads.size;
+        const totalLeadReplies = contactedWhoReplied.size > 0
+            ? contactedWhoReplied.size
+            : Math.min(repliedLeads.size, totalUniqueLeadContacted || repliedLeads.size);
+        const replyRate = totalUniqueLeadContacted > 0
+            ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1)
+            : "0.0";
+
         const dailyHistory = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
 
         const tableStats = {
-            messages: { name: 'Authoritative Email Messages', totalSent, totalReplies, totalUnsubscribed }
+            messages: {
+                name: 'Authoritative Email Messages',
+                totalEmailSent: totalSent,
+                totalSent,
+                totalUniqueLeadContacted,
+                totalLeadReplies,
+                totalReplies,
+                totalUnsubscribed
+            }
         };
 
         return NextResponse.json({
+            totalEmailSent: totalSent,
             totalSent: totalSent,
+            totalUniqueLeadContacted,
+            totalLeadReplies,
+            replyRate,
+            responseRate: replyRate,
             totalReplies,
             totalUnsubscribed,
             tableStats,

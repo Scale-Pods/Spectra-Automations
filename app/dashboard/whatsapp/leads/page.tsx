@@ -355,7 +355,7 @@ export default function WhatsappLeadsPage() {
                                     </tr>
                                 ) : (
                                     paginatedLeads.map((lead, index) => {
-                                        const id = String(lead["Lead ID"] || index);
+                                        const id = String(lead.customer_id || lead["Lead ID"] || lead.id || index);
                                         const wtR = lead["WP_Replied_track"];
                                         const hasReplied = wtR && wtR !== "" && String(wtR).trim().toLowerCase() !== "no";
                                         const waDate = getLeadDate(lead);
@@ -363,7 +363,7 @@ export default function WhatsappLeadsPage() {
                                             <tr
                                                 key={`${id}-${index}`}
                                                 className="hover:bg-[var(--bg-app)] transition-colors group cursor-pointer"
-                                                onClick={() => { setSelectedLeadIdForChat(id); setSelectedLeadObj(lead); }}
+                                                onClick={() => { setSelectedLeadIdForChat(lead.customer_id || id); setSelectedLeadObj(lead); }}
                                             >
                                                 <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                                                     <Checkbox

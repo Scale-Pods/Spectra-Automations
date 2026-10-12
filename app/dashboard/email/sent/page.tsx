@@ -45,6 +45,9 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 
+import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
+
 const ITEMS_PER_PAGE = 7;
 
 export default function SentEmailsPage() {
@@ -56,11 +59,8 @@ export default function SentEmailsPage() {
     const [loadingApi, setLoadingApi] = useState(false);
 
     const [searchQuery, setSearchQuery] = useState("");
-    const [filters, setFilters] = useState({
-        campaign: "all",
-        sender: "all",
-        type: "all",
-    });
+    const [senderFilter, setSenderFilter] = useState("all");
+    const [repliedOnly, setRepliedOnly] = useState(false);
 
     useEffect(() => {
         const fetchEmailThreads = async () => {
@@ -92,9 +92,11 @@ export default function SentEmailsPage() {
                 const recipientName = lead.full_name || lead.customer_name || lead.name || recipientEmail;
                 const messagesList = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
                 const latestMsg = messagesList[messagesList.length - 1] || {};
+                const customerId = lead.customer_id || messagesList.find((m: any) => m.customer_id)?.customer_id || lead.id;
 
                 result.push({
-                    id: lead.id || lead.recipient_address || `email-thread-${lIdx}`,
+                    id: customerId || lead.recipient_address || `email-thread-${lIdx}`,
+                    customer_id: customerId,
                     recipient: recipientName,
                     email: recipientEmail,
                     sender: latestMsg.sender_address || "outreach@spectradubai.com",
@@ -106,7 +108,10 @@ export default function SentEmailsPage() {
                     content: latestMsg.body_text || latestMsg.content || "Email conversation thread.",
                     campaign: "Email Campaign",
                     hasReplied: lead.replied === 'yes',
-                    rawLead: lead,
+                    rawLead: {
+                        ...lead,
+                        customer_id: customerId,
+                    },
                     messagesList
                 });
             });
@@ -149,23 +154,10 @@ export default function SentEmailsPage() {
     }, [allLeads, apiEmailLeads]);
 
 
-    // Dynamic filter options derived from actual database records
+    // Dynamic sender filter options derived from actual database records
     const uniqueSenders = Array.from(
         new Set(sentEmails.map((e) => e.sender).filter((s) => s && s !== "Email Sender"))
     ).sort();
-
-    const uniqueCampaigns = Array.from(
-        new Set(sentEmails.map((e) => e.campaign).filter(Boolean))
-    ).sort();
-
-    const uniqueTypes = Array.from(
-        new Set(sentEmails.map((e) => e.type).filter(Boolean))
-    ).sort();
-
-    const handleFilterChange = (key: string, value: string) => {
-        setFilters((prev) => ({ ...prev, [key]: value }));
-        setPage(1);
-    };
 
     const filteredEmails = sentEmails.filter((email) => {
         // Search
@@ -191,21 +183,16 @@ export default function SentEmailsPage() {
             }
         }
 
-        // Campaign filter (exact match against DB campaign / source table)
-        if (filters.campaign !== "all" && email.campaign !== filters.campaign) {
-            return false;
-        }
-
         // Sender filter (matches selected email in email.sender)
-        if (filters.sender !== "all") {
+        if (senderFilter !== "all") {
             const sLower = (email.sender || "").toLowerCase();
-            if (!sLower.includes(filters.sender.toLowerCase())) {
+            if (!sLower.includes(senderFilter.toLowerCase())) {
                 return false;
             }
         }
 
-        // Type filter (exact match against DB action_type / stage)
-        if (filters.type !== "all" && email.type !== filters.type) {
+        // Replied checkbox filter (shows replied leads only when selected)
+        if (repliedOnly && !email.hasReplied) {
             return false;
         }
 
@@ -249,23 +236,8 @@ export default function SentEmailsPage() {
                 <div className="flex flex-wrap gap-2 items-center">
                     <Filter className="h-4 w-4 text-[var(--label-tertiary)] mr-2" />
 
-                    {/* Dynamic Campaign Filter */}
-                    <Select value={filters.campaign} onValueChange={(val) => handleFilterChange("campaign", val)}>
-                        <SelectTrigger className="w-[180px] h-9 text-xs">
-                            <SelectValue placeholder="All Campaigns" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Campaigns</SelectItem>
-                            {uniqueCampaigns.map((camp) => (
-                                <SelectItem key={camp} value={camp}>
-                                    {camp}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-
                     {/* Sender Filter */}
-                    <Select value={filters.sender} onValueChange={(val) => handleFilterChange("sender", val)}>
+                    <Select value={senderFilter} onValueChange={(val) => { setSenderFilter(val); setPage(1); }}>
                         <SelectTrigger className="w-[200px] h-9 text-xs">
                             <SelectValue placeholder="All Senders" />
                         </SelectTrigger>
@@ -279,20 +251,26 @@ export default function SentEmailsPage() {
                         </SelectContent>
                     </Select>
 
-                    {/* Dynamic Type Filter */}
-                    <Select value={filters.type} onValueChange={(val) => handleFilterChange("type", val)}>
-                        <SelectTrigger className="w-[180px] h-9 text-xs">
-                            <SelectValue placeholder="All Types" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Types</SelectItem>
-                            {uniqueTypes.map((type) => (
-                                <SelectItem key={type} value={type}>
-                                    {type}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    {/* Replied Checkbox Filter */}
+                    <label 
+                        htmlFor="replied-filter" 
+                        className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 h-9 rounded-md border text-xs font-medium cursor-pointer transition-colors select-none",
+                            repliedOnly 
+                                ? "bg-[var(--blue)]/10 border-[var(--blue)] text-[var(--blue)]" 
+                                : "bg-[var(--bg-app)] border-[var(--separator)] text-[var(--label-primary)] hover:bg-[var(--fill-quaternary)]"
+                        )}
+                    >
+                        <Checkbox
+                            id="replied-filter"
+                            checked={repliedOnly}
+                            onCheckedChange={(checked) => {
+                                setRepliedOnly(!!checked);
+                                setPage(1);
+                            }}
+                        />
+                        <span>Replied</span>
+                    </label>
 
                     <Button
                         variant="ghost"
@@ -301,7 +279,8 @@ export default function SentEmailsPage() {
                         onClick={() => {
                             setSearchQuery("");
                             setDateRange(undefined);
-                            setFilters({ campaign: "all", sender: "all", type: "all" });
+                            setSenderFilter("all");
+                            setRepliedOnly(false);
                             setPage(1);
                         }}
                     >
@@ -531,7 +510,7 @@ function SentEmailCard({ email, onOpenThread }: { email: any; onOpenThread: (id:
                                 variant="outline"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    const shareId = email.rawLead?.lead_email || email.rawLead?.email || email.recipient || email.id;
+                                    const shareId = email.rawLead?.customer_id || email.customer_id || email.rawLead?.lead_email || email.rawLead?.email || email.recipient || email.id;
                                     onOpenThread(shareId, email.rawLead);
                                 }}
                                 className="h-8 text-xs gap-1.5 text-blue-600 border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 hover:text-blue-700 rounded-lg font-semibold shadow-2xs"

@@ -42,9 +42,12 @@ export async function GET(request: NextRequest) {
             const isReplied = lead.direction === 'INBOUND' || lead.messages.some(m => m.direction === 'INBOUND');
             const createdIso = lead.latest_date || new Date().toISOString();
 
+            const msgCustomerId = lead.customer_id || lead.messages.find(m => m.customer_id)?.customer_id || matchedCust?.id || null;
+
             const leadObj = {
                 ...matchedCust,
-                id: lead.customer_id || lead.recipient_address,
+                id: msgCustomerId || lead.recipient_address,
+                customer_id: msgCustomerId,
                 conversation_id: lead.conversation_id,
                 eworks_customer_id: lead.eworks_customer_id || matchedCust?.eworks_customer_id || null,
                 recipient_address: lead.recipient_address, // Unique constraint

@@ -434,10 +434,13 @@ export function groupMessagesByRecipient(messages: SpectraMessageRow[]): Message
         const isEmail = latestMsg.channel.toUpperCase() === 'EMAIL';
         const isWA = latestMsg.channel.toUpperCase() === 'WHATSAPP';
 
+        const msgWithCustId = msgList.find(m => m.customer_id);
+        const resolvedCustomerId = msgWithCustId?.customer_id || latestMsg.customer_id || null;
+
         leadSummaries.push({
             recipient_address: recipientAddress,
             eworks_customer_id: eworksCustomerId,
-            customer_id: latestMsg.customer_id || null,
+            customer_id: resolvedCustomerId,
             conversation_id: latestMsg.conversation_id,
             channel: latestMsg.channel,
             lead_name: leadName,

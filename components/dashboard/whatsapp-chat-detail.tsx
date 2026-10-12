@@ -18,6 +18,8 @@ import { useData } from "@/context/DataContext";
 import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 
 import { parseMsgDate, cleanMessageContent } from "@/lib/reply-utils";
+import { ChatAttachmentPreview, MessageAttachment } from "@/components/chat/chat-attachment-preview";
+import { linkAttachmentsToMessages } from "@/lib/attachment-utils";
 
 function parseActivityContent(content: string, summary?: string): any[] {
     if (!content) {
@@ -138,16 +140,20 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
     const [lead, setLead] = useState<ConsolidatedLead | null>(initialLead || null);
     const [loading, setLoading] = useState(true);
     const [messages, setMessages] = useState<any[]>([]);
+    const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
     const [copied, setCopied] = useState(false);
 
     const handleCopyLink = () => {
-        if (!lead) return;
+        if (!lead && !customerId) return;
         const baseUrl = window.location.origin;
-        const eworksId = (lead as any).eworks_customer_id || (lead as any).eworks_id || (lead as any).id || (lead as any)["Lead ID"];
-        const rawPhone = (lead as any).lead_phone || lead.phone || (lead as any)["Phone"] || customerId;
-        const cleanPhone = String(rawPhone).replace(/\s/g, '');
-        const shareId = eworksId || cleanPhone || customerId;
-        const shareUrl = `${baseUrl}/share/whatsapp/${encodeURIComponent(shareId)}`;
+        // Use customer_id from messages table as the unique factor for the URL
+        const msgCustomerId =
+            (lead as any)?.customer_id ||
+            (lead as any)?.messages?.find((m: any) => m.customer_id)?.customer_id ||
+            (messages && messages.find((m: any) => m.customer_id)?.customer_id) ||
+            (lead as any)?.id ||
+            customerId;
+        const shareUrl = `${baseUrl}/share/whatsapp/${encodeURIComponent(msgCustomerId)}`;
 
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(shareUrl).then(() => {
@@ -183,7 +189,8 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
 
             setLoading(true);
             const searchVal = String(customerId).toLowerCase().trim();
-            let found = initialLead || allLeads.find((l: { id: any; phone: any; }) => {
+            let found = initialLead || allLeads.find((l: any) => {
+                if (String(l.customer_id || '').toLowerCase() === searchVal) return true;
                 if (String(l.id).toLowerCase() === searchVal) return true;
                 if (l.phone) {
                     const lPhoneReplaced = String(l.phone).replace(/\D/g, '');
@@ -213,6 +220,7 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                         const allFetched = [...nr_wf, ...followup, ...nurture, ...owners, ...wa_activity];
 
                         found = allFetched.find((l: any) => {
+                            if (String(l.customer_id || '').toLowerCase() === searchVal) return true;
                             if (String(l.id || l["Lead ID"]).toLowerCase() === searchVal) return true;
                             if (l.phone || l.Phone || l.lead_phone) {
                                 const lPhoneReplaced = String(l.phone || l.Phone || l.lead_phone).replace(/\D/g, '');
@@ -268,6 +276,9 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
 
                 if (f.messages && Array.isArray(f.messages) && f.messages.length > 0) {
                     timeline = f.messages.map((m: any, idx: number) => ({
+                        id: m.id,
+                        customer_id: m.customer_id,
+                        raw: m,
                         type: m.direction === 'INBOUND' ? 'user' : 'bot',
                         content: m.body_text || m.subject || '',
                         label: m.direction === 'INBOUND' ? 'User' : (m.provider || 'Spectra AI'),
@@ -355,9 +366,30 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
             }
 
             setMessages(timeline);
+
+            // Fetch attachments matching customer_id
+            const effectiveCustId =
+                (found as any)?.customer_id ||
+                (found as any)?.id ||
+                customerId;
+            const effectiveEworksId = (found as any)?.eworks_customer_id;
+
+            try {
+                const attUrl = `/api/messages/attachments?customer_id=${encodeURIComponent(effectiveCustId)}${effectiveEworksId ? `&eworks_customer_id=${effectiveEworksId}` : ''}`;
+                const attRes = await fetch(attUrl);
+                if (attRes.ok) {
+                    const attData = await attRes.json();
+                    if (isMounted) {
+                        setAttachments(attData.attachments || []);
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching attachments in WhatsAppChatDetail:", err);
+            }
             } else {
                 setLead(null);
                 setMessages(EMPTY_MESSAGES);
+                setAttachments([]);
             }
             setLoading(false);
         }
@@ -391,15 +423,32 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
         });
     }, [messages, lead]);
 
+    // Link attachments to messages (matching by exact message_id or AI summary content)
+    const messagesWithAttachments = React.useMemo(() => {
+        const { messagesWithAttachments: mapped, unlinkedAttachments } = linkAttachmentsToMessages(messagesWithDates, attachments);
+        if (unlinkedAttachments.length > 0 && mapped.length > 0) {
+            const lastInbound = [...mapped].reverse().find(m => m.type === 'user');
+            if (lastInbound) {
+                lastInbound.attachments = [...(lastInbound.attachments || []), ...unlinkedAttachments];
+            } else {
+                mapped[mapped.length - 1].attachments = [
+                    ...(mapped[mapped.length - 1].attachments || []),
+                    ...unlinkedAttachments
+                ];
+            }
+        }
+        return mapped;
+    }, [messagesWithDates, attachments]);
+
     const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (messagesWithDates.length > 0) {
+        if (messagesWithAttachments.length > 0) {
             setTimeout(() => {
                 messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
         }
-    }, [messagesWithDates]);
+    }, [messagesWithAttachments]);
 
     if (loading) {
         return (
@@ -467,14 +516,14 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
-                        {messagesWithDates.length === 0 ? (
+                        {messagesWithAttachments.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-[var(--label-tertiary)] space-y-2">
                                 <MessageSquare className="h-10 w-10 opacity-20" />
                                 <p className="text-sm">No WhatsApp messages found in database.</p>
                             </div>
                         ) : (
                             <>
-                                {messagesWithDates.map((msg, idx) => {
+                                {messagesWithAttachments.map((msg, idx) => {
                                     // Build delivery-status pill for outgoing messages
                                     let tsPill: React.ReactNode = null;
                                     if (msg.type === 'bot' && (msg as any).tsStatus) {
@@ -517,6 +566,12 @@ export function WhatsAppChatDetail({ customerId, onClose, initialLead }: WhatsAp
                                                 <p className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
                                                     {msg.content}
                                                 </p>
+                                                {msg.attachments && msg.attachments.length > 0 && (
+                                                    <ChatAttachmentPreview
+                                                        attachments={msg.attachments}
+                                                        isDarkBubble={msg.type !== 'user'}
+                                                    />
+                                                )}
                                             </div>
                                             {msg.date && (
                                                 <span className="text-[10px] text-[var(--label-tertiary)] mt-1 px-1">

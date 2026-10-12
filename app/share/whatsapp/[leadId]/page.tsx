@@ -3,8 +3,10 @@
 import React, { useState, useEffect, use } from "react";
 import {
     RefreshCw, MessageSquare, User, Bot, Link as LinkIcon,
-    Check, Activity, Database, Zap, ThermometerSun
+    Check, Activity, Database, Zap
 } from "lucide-react";
+import { ChatAttachmentPreview, MessageAttachment } from "@/components/chat/chat-attachment-preview";
+import { linkAttachmentsToMessages } from "@/lib/attachment-utils";
 
 // ─── Parse WhatsApp activity content into messages ────────────────────────────
 function parseActivityContent(content: string, summary?: string): any[] {
@@ -101,20 +103,13 @@ function getStatusStyle(status: string) {
     return 'bg-white/5 text-slate-400 border border-white/10';
 }
 
-function getTempStyle(temp: string) {
-    const t = (temp || '').toLowerCase();
-    if (t.includes('hot')) return 'bg-red-500/10 text-red-400 border border-red-500/20';
-    if (t.includes('warm')) return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
-    if (t.includes('cold')) return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-    return 'bg-white/5 text-slate-400 border border-white/10';
-}
-
 export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ leadId: string }> }) {
     const { leadId } = use(params);
     const decodedLeadId = decodeURIComponent(leadId || '');
 
     const [lead, setLead] = useState<any>(null);
     const [messages, setMessages] = useState<any[]>([]);
+    const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
@@ -128,8 +123,8 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
 
             const isEmail = decodedLeadId.includes('@');
             const query = isEmail
-                ? `channel=whatsapp&email=${encodeURIComponent(decodedLeadId)}`
-                : `channel=whatsapp&id=${encodeURIComponent(decodedLeadId)}`;
+                ? `channel=whatsapp&email=${encodeURIComponent(decodedLeadId)}&customer_id=${encodeURIComponent(decodedLeadId)}&id=${encodeURIComponent(decodedLeadId)}`
+                : `channel=whatsapp&customer_id=${encodeURIComponent(decodedLeadId)}&id=${encodeURIComponent(decodedLeadId)}`;
 
             try {
                 const res = await fetch(`/api/public/share?${query}`, {
@@ -144,13 +139,30 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                 }
 
                 const data = await res.json();
-                setLead(data.lead || { name: decodedLeadId, phone: decodedLeadId });
+                setLead(data.lead || { id: decodedLeadId, customer_id: decodedLeadId, name: decodedLeadId, phone: decodedLeadId });
+                setAttachments(data.attachments || []);
+
+                // Fallback fetch if attachments weren't populated
+                if (!data.attachments || data.attachments.length === 0) {
+                    const custId = data.lead?.customer_id || data.lead?.id || decodedLeadId;
+                    try {
+                        const attRes = await fetch(`/api/messages/attachments?customer_id=${encodeURIComponent(custId)}`);
+                        if (attRes.ok) {
+                            const attData = await attRes.json();
+                            setAttachments(attData.attachments || []);
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch fallback attachments', e);
+                    }
+                }
 
                 const allMessages: any[] = [];
                 for (const act of (data.activities || [])) {
                     if (act.direction === 'INBOUND' || act.direction === 'OUTBOUND') {
                         const isUser = act.direction === 'INBOUND' || (act.status && String(act.status).toLowerCase().includes('reply'));
                         allMessages.push({
+                            id: act.id,
+                            raw: act,
                             type: isUser ? 'user' : 'bot',
                             content: act.content || act.note || act.summary || '',
                             label: isUser ? 'USER' : (act.channel ? `META_${String(act.channel).toUpperCase()}` : 'META_WHATSAPP'),
@@ -163,6 +175,7 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                         parsed.forEach(m => {
                             if (!m.date && act.created_at) m.date = act.created_at;
                             if ((act as any).status) (m as any).tsStatus = (act as any).status;
+                            (m as any).raw = act;
                         });
                         allMessages.push(...parsed);
                     }
@@ -178,8 +191,26 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
         loadData();
     }, [decodedLeadId]);
 
+    // Link attachments to messages (matching by exact message_id or AI summary content)
+    const messagesWithAttachments = React.useMemo(() => {
+        const { messagesWithAttachments: mapped, unlinkedAttachments } = linkAttachmentsToMessages(messages, attachments);
+        if (unlinkedAttachments.length > 0 && mapped.length > 0) {
+            const lastInbound = [...mapped].reverse().find(m => m.type === 'user');
+            if (lastInbound) {
+                lastInbound.attachments = [...(lastInbound.attachments || []), ...unlinkedAttachments];
+            } else {
+                mapped[mapped.length - 1].attachments = [
+                    ...(mapped[mapped.length - 1].attachments || []),
+                    ...unlinkedAttachments
+                ];
+            }
+        }
+        return mapped;
+    }, [messages, attachments]);
+
     const handleCopyLink = () => {
-        const url = window.location.href;
+        const uniqueCustomerId = lead?.customer_id || lead?.id || decodedLeadId;
+        const url = `${window.location.origin}/share/whatsapp/${encodeURIComponent(uniqueCustomerId)}`;
         navigator.clipboard?.writeText(url).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
@@ -233,13 +264,13 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                     <MessageSquare className="h-10 w-10 opacity-20" />
                                     <p className="text-sm">{error}</p>
                                 </div>
-                            ) : messages.length === 0 ? (
+                            ) : messagesWithAttachments.length === 0 ? (
                                 <div className="h-64 flex flex-col items-center justify-center gap-3 text-slate-400">
                                     <MessageSquare className="h-10 w-10 opacity-20" />
                                     <p className="text-sm">No WhatsApp messages found for this contact.</p>
                                 </div>
                             ) : (
-                                messages.map((msg, idx) => {
+                                messagesWithAttachments.map((msg, idx) => {
                                     let tsPill: React.ReactNode = null;
                                     if (msg.type === 'bot' && (msg as any).tsStatus) {
                                         const rawStatus = String((msg as any).tsStatus).toUpperCase();
@@ -284,6 +315,12 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                                 <p className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
                                                     {msg.content}
                                                 </p>
+                                                {msg.attachments && msg.attachments.length > 0 && (
+                                                    <ChatAttachmentPreview
+                                                        attachments={msg.attachments}
+                                                        isDarkBubble={msg.type !== 'user'}
+                                                    />
+                                                )}
                                             </div>
                                             {msg.date && (
                                                 <span className="text-[10px] text-slate-500 mt-1 px-1">
@@ -383,17 +420,6 @@ export default function PublicWhatsAppSharePage({ params }: { params: Promise<{ 
                                                 <Zap className="h-3 w-3" />
                                                 {lead.action_type}
                                             </p>
-                                        </div>
-                                    )}
-
-                                    {/* Lead Temperature */}
-                                    {lead.lead_temp && (
-                                        <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Lead Temperature</p>
-                                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${getTempStyle(lead.lead_temp)}`}>
-                                                <ThermometerSun className="h-3 w-3" />
-                                                {lead.lead_temp}
-                                            </span>
                                         </div>
                                     )}
 

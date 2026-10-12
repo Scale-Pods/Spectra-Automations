@@ -136,13 +136,19 @@ export async function GET(request: NextRequest) {
                 if (
                     String(c.eworks_customer_id || '').trim().toLowerCase() === sId ||
                     String(c.id || '').trim().toLowerCase() === sId ||
-                    String(c.customer_id || '').trim().toLowerCase() === sId
+                    String(c.customer_id || '').trim().toLowerCase() === sId ||
+                    (c.email && String(c.email).trim().toLowerCase() === sId)
                 ) {
                     return true;
                 }
             }
             return false;
         });
+
+        if (!matchedCustomer && idParam && idParam.includes('@')) {
+            const targetEmail = idParam.trim().toLowerCase();
+            matchedCustomer = customers.find(c => c.email && c.email.trim().toLowerCase() === targetEmail);
+        }
 
         if (!matchedCustomer && idParam) {
             const cleanIdDigits = String(idParam).replace(/\D/g, '');
@@ -170,15 +176,26 @@ export async function GET(request: NextRequest) {
             matchedCustomer = customers.find(c => c.email && c.email.trim().toLowerCase() === targetEmail);
         }
 
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(idParam).trim());
+
         let msgQuery = supabaseAdmin
             .from('messages')
             .select('*')
             .ilike('channel', channel);
 
         if (matchedCustomer) {
-            msgQuery = msgQuery.eq('customer_id', matchedCustomer.id);
+            const custEmail = matchedCustomer.email || email || (idParam.includes('@') ? idParam : '');
+            if (custEmail) {
+                msgQuery = msgQuery.or(`customer_id.eq.${matchedCustomer.id},sender_address.ilike.%${custEmail}%,recipient_address.ilike.%${custEmail}%`);
+            } else {
+                msgQuery = msgQuery.eq('customer_id', matchedCustomer.id);
+            }
         } else if (idParam) {
-            msgQuery = msgQuery.or(`customer_id.eq.${idParam},sender_address.ilike.%${idParam}%,recipient_address.ilike.%${idParam}%`);
+            if (isUuid) {
+                msgQuery = msgQuery.eq('customer_id', idParam.trim());
+            } else {
+                msgQuery = msgQuery.or(`sender_address.ilike.%${idParam}%,recipient_address.ilike.%${idParam}%`);
+            }
         } else if (phone) {
             const cleanInput = phone.replace(/\D/g, '');
             if (cleanInput.length >= 7) {
@@ -199,6 +216,7 @@ export async function GET(request: NextRequest) {
             return {
                 id: m.id,
                 lead_id: m.customer_id,
+                customer_id: m.customer_id,
                 lead_name: custName,
                 lead_phone: cust.phone_e164 || m.sender_address || m.recipient_address || phone,
                 lead_email: cust.email || m.sender_address || m.recipient_address || email,
@@ -252,6 +270,7 @@ export async function GET(request: NextRequest) {
 
         const lead = matchedCustomer ? {
             id: matchedCustomer.id,
+            customer_id: matchedCustomer.id,
             eworks_customer_id: matchedCustomer.eworks_customer_id || matchedCustomer.id,
             name: matchedCustomer.full_name || matchedCustomer.customer_name || `${matchedCustomer.first_name || ''} ${matchedCustomer.last_name || ''}`.trim() || 'Customer',
             phone: matchedCustomer.phone_e164 || matchedCustomer.mobile_raw || matchedCustomer.telephone_raw || matchedCustomer.phone || phone,
@@ -267,7 +286,8 @@ export async function GET(request: NextRequest) {
             lead_temp: matchedCustomer.lead_temp || matchedCustomer.sentiment || matchedCustomer["Lead Temperature"] || 'Warm',
             summary: matchedCustomer.summary || matchedCustomer.note || matchedCustomer.WA_note,
         } : (activities[0] ? {
-            id: activities[0].lead_id,
+            id: activities[0].customer_id || activities[0].lead_id,
+            customer_id: activities[0].customer_id || activities[0].lead_id,
             eworks_customer_id: activities[0].lead_id,
             name: activities[0].lead_name,
             phone: activities[0].lead_phone,
@@ -284,8 +304,19 @@ export async function GET(request: NextRequest) {
             summary: activities[0].summary
         } : null);
 
+        const effectiveCustomerId = lead?.customer_id || lead?.id || (isUuid ? idParam.trim() : null) || matchedCustomer?.id;
+        let attachments: any[] = [];
+        if (effectiveCustomerId) {
+            const { data: atts } = await supabaseAdmin
+                .from('message_attachments')
+                .select('*')
+                .eq('customer_id', effectiveCustomerId)
+                .order('created_at', { ascending: true });
+            attachments = atts || [];
+        }
+
         return NextResponse.json(
-            { lead, activities },
+            { lead, activities, attachments },
             {
                 status: 200,
                 headers: {

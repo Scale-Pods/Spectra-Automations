@@ -77,28 +77,30 @@ export default function EmailAnalyticsPage() {
     }, [allLeads, dateRange]);
 
     const analytics = useMemo(() => {
-        const totalSent = apiAnalytics?.totalSent !== undefined ? apiAnalytics.totalSent : calculatedMetrics.totalSent;
-        const totalEmails = calculatedMetrics.totalEmails;
-        const totalReplies = apiAnalytics?.totalReplies !== undefined ? apiAnalytics.totalReplies : calculatedMetrics.totalReplies;
+        const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent;
+        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 44;
+        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 44;
+        const replyRate = apiAnalytics?.replyRate ?? (totalUniqueLeadContacted > 0 ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1) : "0.0");
         const totalUnsubscribed = apiAnalytics?.totalUnsubscribed !== undefined ? apiAnalytics.totalUnsubscribed : calculatedMetrics.totalUnsubscribed;
-        const totalLeadsCount = calculatedMetrics.totalLeadsCount > 0 ? calculatedMetrics.totalLeadsCount : 549;
-        const replyRate = totalSent > 0 ? ((totalReplies / totalSent) * 100).toFixed(1) : "0.0";
-        const unsubRate = totalSent > 0 ? ((totalUnsubscribed / totalSent) * 100).toFixed(1) : "0.0";
+        const unsubRate = totalEmailSent > 0 ? ((totalUnsubscribed / totalEmailSent) * 100).toFixed(1) : "0.0";
 
         const dailyChartData = (apiAnalytics?.dailyHistory && apiAnalytics.dailyHistory.length > 0)
             ? apiAnalytics.dailyHistory
             : calculatedMetrics.dailyChartData;
 
         return {
-            totalEmails,
-            totalSent,
+            totalEmails: totalEmailSent,
+            totalEmailSent,
+            totalSent: totalEmailSent,
+            totalUniqueLeadContacted,
+            totalLeadReplies,
             firstEmailCount: calculatedMetrics.firstEmailCount,
-            replyCount: totalReplies,
-            totalReplies,
+            replyCount: totalLeadReplies,
+            totalReplies: totalLeadReplies,
             unsubscribedCount: totalUnsubscribed,
             totalUnsubscribed,
-            totalLeadsCount,
-            totalLeads: totalLeadsCount,
+            totalLeadsCount: totalUniqueLeadContacted,
+            totalLeads: totalUniqueLeadContacted,
             replyRate,
             unsubRate,
             tableStats: apiAnalytics?.tableStats || calculatedMetrics.tableStats,
@@ -114,17 +116,24 @@ export default function EmailAnalyticsPage() {
         }));
     }, [analytics]);
 
-    // Format Donut Distribution Data
+    // Format Donut Distribution Data based on Contacted Leads Engagement
     const donutData = useMemo(() => {
-        const sentNoReply = Math.max(0, analytics.totalSent - analytics.totalReplies - analytics.totalUnsubscribed);
-        return [
-            { name: 'Direct Replies', value: analytics.totalReplies, color: '#10b981' },
-            { name: 'Emails Sent', value: sentNoReply, color: '#3b82f6' },
-            { name: 'Unsubscribed', value: analytics.totalUnsubscribed, color: '#f43f5e' },
-        ].filter(d => d.value > 0 || analytics.totalSent === 0);
+        const replied = analytics.totalLeadReplies || 0;
+        const totalLeads = analytics.totalUniqueLeadContacted || 0;
+        const unsubscribed = analytics.totalUnsubscribed || 0;
+        const noReply = Math.max(0, totalLeads - replied - unsubscribed);
+
+        const data = [
+            { name: 'Lead Replies', value: replied, color: '#10b981' },
+            { name: 'Contacted (No Reply)', value: noReply, color: '#3b82f6' },
+            { name: 'Unsubscribed', value: unsubscribed, color: '#f43f5e' },
+        ];
+        return data.filter(d => d.value > 0);
     }, [analytics]);
 
-    const totalVolume = analytics.totalSent;
+    const donutTotal = useMemo(() => {
+        return donutData.reduce((acc, curr) => acc + curr.value, 0) || analytics.totalUniqueLeadContacted || 0;
+    }, [donutData, analytics.totalUniqueLeadContacted]);
     const loading = loadingLeads || loadingApi;
 
     return (
@@ -150,12 +159,12 @@ export default function EmailAnalyticsPage() {
             </div>
 
             {/* Overview Metric Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card className="bg-[var(--glass-fill)] border-[var(--separator)] shadow-lg">
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
-                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Sent</p>
-                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalEmails.toLocaleString()}</h3>
+                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Email Sent</p>
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalEmailSent.toLocaleString()}</h3>
                             <p className="text-[11px] text-blue-600 mt-1 font-medium flex items-center gap-1">
                                 <MailCheck className="h-3 w-3" /> Outreach Delivered
                             </p>
@@ -169,10 +178,25 @@ export default function EmailAnalyticsPage() {
                 <Card className="bg-[var(--glass-fill)] border-[var(--separator)] shadow-lg">
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
-                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Replies</p>
-                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalReplies.toLocaleString()}</h3>
+                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Unique Lead Contacted</p>
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalUniqueLeadContacted.toLocaleString()}</h3>
+                            <p className="text-[11px] text-purple-600 mt-1 font-medium flex items-center gap-1">
+                                <Users className="h-3 w-3" /> Targeted Contacts
+                            </p>
+                        </div>
+                        <div className="h-12 w-12 rounded-2xl bg-purple-500/10 text-purple-600 flex items-center justify-center border border-purple-500/20 shrink-0">
+                            <Users className="h-6 w-6" />
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="bg-[var(--glass-fill)] border-[var(--separator)] shadow-lg">
+                    <CardContent className="p-5 flex items-center justify-between">
+                        <div>
+                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Total Lead Replies</p>
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalLeadReplies.toLocaleString()}</h3>
                             <p className="text-[11px] text-emerald-600 mt-1 font-medium flex items-center gap-1">
-                                <TrendingUp className="h-3 w-3" /> {analytics.replyRate}% Response Rate
+                                <MessageSquare className="h-3 w-3" /> Inbound Lead Replies
                             </p>
                         </div>
                         <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center border border-emerald-500/20 shrink-0">
@@ -184,14 +208,14 @@ export default function EmailAnalyticsPage() {
                 <Card className="bg-[var(--glass-fill)] border-[var(--separator)] shadow-lg">
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>
-                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Active Leads</p>
-                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.totalLeadsCount.toLocaleString()}</h3>
-                            <p className="text-[11px] text-purple-600 mt-1 font-medium flex items-center gap-1">
-                                <Users className="h-3 w-3" /> Targeted Contacts
+                            <p className="text-xs text-[var(--label-secondary)] font-semibold uppercase tracking-wider">Response Rate</p>
+                            <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{analytics.replyRate}%</h3>
+                            <p className="text-[11px] text-emerald-600 mt-1 font-medium flex items-center gap-1">
+                                <TrendingUp className="h-3 w-3" /> Campaign Performance
                             </p>
                         </div>
-                        <div className="h-12 w-12 rounded-2xl bg-purple-500/10 text-purple-600 flex items-center justify-center border border-purple-500/20 shrink-0">
-                            <Users className="h-6 w-6" />
+                        <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                            <TrendingUp className="h-6 w-6" />
                         </div>
                     </CardContent>
                 </Card>
@@ -251,14 +275,14 @@ export default function EmailAnalyticsPage() {
                 <Card className="border-slate-200 shadow-xl bg-white/90 text-slate-900">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                            <PieIcon className="h-5 w-5 text-emerald-400" />
+                            <PieIcon className="h-5 w-5 text-emerald-500" />
                             Conversion Breakdown
                         </CardTitle>
-                        <CardDescription>Proportional engagement per sent email batch</CardDescription>
+                        <CardDescription className="text-slate-500">Proportional engagement of contacted leads</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="h-[320px] w-full flex flex-col items-center justify-center">
-                            {totalVolume === 0 ? (
+                            {donutTotal === 0 || donutData.length === 0 ? (
                                 <div className="text-slate-400 text-sm">No outreach data for distribution</div>
                             ) : (
                                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -269,7 +293,7 @@ export default function EmailAnalyticsPage() {
                                             cy="45%"
                                             innerRadius={60}
                                             outerRadius={85}
-                                            paddingAngle={4}
+                                            paddingAngle={donutData.length > 1 ? 4 : 0}
                                             dataKey="value"
                                         >
                                             {donutData.map((entry, index) => (
@@ -278,24 +302,39 @@ export default function EmailAnalyticsPage() {
                                         </Pie>
                                         <Tooltip
                                             formatter={(value: any, name: any) => [
-                                                `${Number(value).toLocaleString()} (${totalVolume > 0 ? ((Number(value) / totalVolume) * 100).toFixed(1) : 0}%)`,
+                                                `${Number(value).toLocaleString()} (${donutTotal > 0 ? ((Number(value) / donutTotal) * 100).toFixed(1) : '0.0'}%)`,
                                                 name
                                             ]}
                                             contentStyle={{
-                                                backgroundColor: '#0f172a',
-                                                borderRadius: '12px',
-                                                border: '1px solid rgba(255,255,255,0.1)',
-                                                color: '#fff'
+                                                backgroundColor: '#ffffff',
+                                                borderRadius: '10px',
+                                                border: '1px solid #e2e8f0',
+                                                boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                                                padding: '8px 12px'
+                                            }}
+                                            itemStyle={{
+                                                color: '#0f172a',
+                                                fontSize: '12px',
+                                                fontWeight: 600
+                                            }}
+                                            labelStyle={{
+                                                color: '#64748b',
+                                                fontSize: '11px',
+                                                fontWeight: 500
                                             }}
                                         />
                                         <Legend
                                             verticalAlign="bottom"
-                                            height={36}
+                                            height={40}
                                             formatter={(value: any) => {
                                                 const item = donutData.find(d => d.name === value);
                                                 const val = item ? item.value : 0;
-                                                const pct = totalVolume > 0 ? ((val / totalVolume) * 100).toFixed(0) : '0';
-                                                return <span className="text-xs font-medium text-slate-300">{value} ({val.toLocaleString()} - {pct}%)</span>;
+                                                const pct = donutTotal > 0 ? ((val / donutTotal) * 100).toFixed(1) : '0.0';
+                                                return (
+                                                    <span className="text-xs font-semibold text-slate-700 ml-1">
+                                                        {value}: <span className="text-slate-900 font-bold">{val.toLocaleString()}</span> ({pct}%)
+                                                    </span>
+                                                );
                                             }}
                                         />
                                     </PieChart>

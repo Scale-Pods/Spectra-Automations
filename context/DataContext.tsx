@@ -20,11 +20,23 @@ export interface MasterMetrics {
     ownerWaReachouts: number;
     ownerWaReplies: number;
     activityEmailCount?: number;
+    activityEmailSentCount?: number;
+    activityEmailUniqueLeadsCount?: number;
+    activityEmailLeadRepliesCount?: number;
+    activityEmailReplyRate?: string;
+    totalWaUniqueLeadsCount?: number;
+    totalWaLeadReplies?: number;
+    totalUniqueLeadsContacted?: number;
+    totalLeadReplies?: number;
+    overallReplyRate?: string;
     activityWaCount?: number;
     activityVoiceCount?: number;
     activitySmsCount?: number;
     activityRepliesCount?: number;
     activityTotalCount?: number;
+    eworksInvoiced?: number;
+    eworksActiveJobs?: number;
+    eworksPendingQuotes?: number;
 }
 
 export interface WhatsappMetrics {

@@ -179,8 +179,17 @@ export function TotalRepliesView({ leads = [], dateRange, onViewLead }: { leads?
     // Sort heavily by newest reply first
     realData.sort((a, b) => b.sortDate.getTime() - a.sortDate.getTime());
 
-    // Filter logic based on search and mode filter
+    // Filter logic based on search, mode filter, and dateRange
     const filteredData = realData.filter(item => {
+        if (dateRange?.from) {
+            const from = new Date(dateRange.from);
+            from.setHours(0, 0, 0, 0);
+            const to = dateRange.to ? new Date(dateRange.to) : new Date(from);
+            to.setHours(23, 59, 59, 999);
+            if (item.sortDate < from || item.sortDate > to) {
+                return false;
+            }
+        }
         const matchesSearch = !search ||
             item.contactName.toLowerCase().includes(search.toLowerCase()) ||
             item.contactInfo.toLowerCase().includes(search.toLowerCase()) ||

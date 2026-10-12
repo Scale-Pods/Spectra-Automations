@@ -11,6 +11,9 @@ export interface EmailTableStat {
 export interface EmailMetricsResult {
     totalEmails: number;
     totalSent: number;
+    totalEmailSent: number;
+    totalUniqueLeadContacted: number;
+    totalLeadReplies: number;
     firstEmailCount: number;
     replyCount: number;
     totalReplies: number;
@@ -19,6 +22,7 @@ export interface EmailMetricsResult {
     totalLeadsCount: number;
     totalLeads: number;
     replyRate: string;
+    responseRate: string;
     unsubRate: string;
     tableStats: {
         naples: EmailTableStat;
@@ -105,6 +109,8 @@ export function calculateEmailMetrics(
     }
 
     let totalEmails = 0;
+    let totalUniqueLeadContacted = 0;
+    let totalLeadReplies = 0;
     let firstEmailCount = 0;
     let replyCount = 0;
     let unsubscribedCount = 0;
@@ -127,6 +133,7 @@ export function calculateEmailMetrics(
 
         const tableKey = getLeadSourceTableKey(lead);
         let leadHasEmail = false;
+        let leadContacted = false;
 
         // Count non-empty email_1..email_4 steps
         ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
@@ -134,6 +141,7 @@ export function calculateEmailMetrics(
                 totalEmails++;
                 tableStats[tableKey].emails++;
                 leadHasEmail = true;
+                leadContacted = true;
                 if (idx === 0) firstEmailCount++;
 
                 const emailDate = lead.created_at || lead.eworks_created_on ? new Date(lead.created_at || lead.eworks_created_on) : null;
@@ -147,11 +155,30 @@ export function calculateEmailMetrics(
             }
         });
 
+        // Also check if lead has outbound messages in lead.messages
+        if (lead.messages && Array.isArray(lead.messages)) {
+            const hasOutbound = lead.messages.some((m: any) => m.direction === 'OUTBOUND');
+            if (hasOutbound) {
+                leadContacted = true;
+                leadHasEmail = true;
+            }
+        }
+
+        if (leadContacted) {
+            totalUniqueLeadContacted++;
+        }
+
         // Check Email Replies
-        if (checkIsReplied(lead.email_reply)) {
+        const isReplied = checkIsReplied(lead.email_reply) ||
+            lead.email_replied ||
+            (lead.replied === 'yes') ||
+            (lead.messages && Array.isArray(lead.messages) && lead.messages.some((m: any) => m.direction === 'INBOUND'));
+
+        if (isReplied) {
             leadHasEmail = true;
             replyCount++;
             tableStats[tableKey].replies++;
+            totalLeadReplies++;
 
             let replyDate: Date | null = null;
             if (Array.isArray(lead.email_reply)) {
@@ -196,12 +223,17 @@ export function calculateEmailMetrics(
     });
 
     const dailyChartData = Object.values(dailyMap);
-    const replyRate = totalEmails > 0 ? ((replyCount / totalEmails) * 100).toFixed(1) : "0.0";
+    const calculatedResponseRate = totalUniqueLeadContacted > 0
+        ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1)
+        : "0.0";
     const unsubRate = totalEmails > 0 ? ((unsubscribedCount / totalEmails) * 100).toFixed(1) : "0.0";
 
     return {
         totalEmails,
         totalSent: totalEmails,
+        totalEmailSent: totalEmails,
+        totalUniqueLeadContacted,
+        totalLeadReplies,
         firstEmailCount,
         replyCount,
         totalReplies: replyCount,
@@ -209,7 +241,8 @@ export function calculateEmailMetrics(
         totalUnsubscribed: unsubscribedCount,
         totalLeadsCount: totalLeadsCount || (allLeads ? allLeads.length : 0),
         totalLeads: totalLeadsCount || (allLeads ? allLeads.length : 0),
-        replyRate,
+        replyRate: calculatedResponseRate,
+        responseRate: calculatedResponseRate,
         unsubRate,
         tableStats,
         dailyChartData,

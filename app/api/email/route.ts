@@ -32,12 +32,15 @@ export async function GET(request: NextRequest) {
         const leadSummaries = groupMessagesByRecipient(messages);
 
         const emailLeads = leadSummaries.map(lead => {
-            const matchedCust = lead.customer_id ? customersMap.get(lead.customer_id) : (lead.lead_email ? customersMap.get(lead.lead_email.toLowerCase()) : (lead.eworks_customer_id ? customersMap.get(String(lead.eworks_customer_id)) : null));
+            const msgCustomerId = lead.customer_id || lead.messages.find(m => m.customer_id)?.customer_id || null;
+            const matchedCust = msgCustomerId ? customersMap.get(msgCustomerId) : (lead.lead_email ? customersMap.get(lead.lead_email.toLowerCase()) : (lead.eworks_customer_id ? customersMap.get(String(lead.eworks_customer_id)) : null));
+            const finalCustomerId = msgCustomerId || matchedCust?.id || null;
             const isReplied = lead.direction === 'INBOUND' || lead.messages.some(m => m.direction === 'INBOUND');
 
             return {
                 ...matchedCust,
-                id: lead.customer_id || lead.recipient_address,
+                id: finalCustomerId || lead.recipient_address,
+                customer_id: finalCustomerId,
                 conversation_id: lead.conversation_id,
                 eworks_customer_id: lead.eworks_customer_id || matchedCust?.eworks_customer_id || null,
                 recipient_address: lead.recipient_address, // Unique constraint

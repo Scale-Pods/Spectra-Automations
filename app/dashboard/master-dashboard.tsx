@@ -5,6 +5,7 @@ import {
     Users,
     MessageCircle,
     TrendingUp,
+    Mail,
     PieChart as PieChartIcon,
     Activity,
     Maximize2,
@@ -52,7 +53,7 @@ import { extractReplyDate } from "@/lib/reply-utils";
 import { SPECTRA_EWORKS_METRICS } from "@/lib/eworks-data";
 
 export default function MasterDashboard() {
-    const { masterMetrics, leads, loadingMasterMetrics, loadingLeads } = useData();
+    const { masterMetrics, leads, loadingMasterMetrics, loadingLeads, refreshMasterMetrics, refreshLeads } = useData();
     const [isRepliesModalOpen, setIsRepliesModalOpen] = useState(false);
     const [isRepliesExpanded, setIsRepliesExpanded] = useState(false);
     const [chatLead, setChatLead] = useState<any | null>(null);
@@ -62,6 +63,16 @@ export default function MasterDashboard() {
     });
 
     const loading = loadingMasterMetrics || loadingLeads;
+
+    // Trigger dynamic metrics and leads re-fetch on mount and when dateRange changes
+    useEffect(() => {
+        if (dateRange?.from) {
+            const from = startOfDay(new Date(dateRange.from));
+            const to = dateRange.to ? endOfDay(new Date(dateRange.to)) : endOfDay(from);
+            refreshMasterMetrics({ from, to, force: true });
+            refreshLeads({ from, to, force: true });
+        }
+    }, [dateRange, refreshMasterMetrics, refreshLeads]);
 
     const combinedReplyLeads = useMemo(() => {
         return (leads || []).filter((l: any) => {
@@ -73,12 +84,21 @@ export default function MasterDashboard() {
         });
     }, [leads]);
 
-    const displayTotalLeads = masterMetrics?.totalLeads ?? leads.length;
-    const displayEmailsSent = masterMetrics?.activityEmailCount ?? 0;
+    const displayTotalLeads = masterMetrics?.totalLeads ?? 0;
+    const displayEmailsSent = masterMetrics?.activityEmailSentCount ?? masterMetrics?.activityEmailCount ?? 0;
+    const displayEmailUniqueLeads = masterMetrics?.activityEmailUniqueLeadsCount ?? 0;
+    const displayEmailLeadReplies = masterMetrics?.activityEmailLeadRepliesCount ?? 0;
+    const displayEmailReplyRate = masterMetrics?.activityEmailReplyRate ?? "0.0";
     const displayWaReachouts = masterMetrics?.totalWaReachouts || masterMetrics?.activityWaCount || 0;
-    const displayReplies = masterMetrics?.activityRepliesCount || masterMetrics?.totalWaReplies || 0;
     const totalOutreach = displayEmailsSent + displayWaReachouts;
-    const displayReplyRate = totalOutreach > 0 ? ((displayReplies / totalOutreach) * 100).toFixed(1) : "0.0";
+    const displayReplies = masterMetrics?.totalLeadReplies ?? masterMetrics?.activityRepliesCount ?? 0;
+    const displayReplyRate = masterMetrics?.overallReplyRate ?? (displayEmailUniqueLeads + (masterMetrics?.totalWaUniqueLeadsCount || 0) > 0 
+        ? ((displayReplies / (displayEmailUniqueLeads + (masterMetrics?.totalWaUniqueLeadsCount || 0))) * 100).toFixed(1) 
+        : "0.0");
+
+    const displayEworksInvoiced = masterMetrics?.eworksInvoiced ?? 0;
+    const displayEworksActiveJobs = masterMetrics?.eworksActiveJobs ?? 0;
+    const displayEworksPendingQuotes = masterMetrics?.eworksPendingQuotes ?? 0;
 
     const acquisitionChartData = useMemo(() => {
         const daily = masterMetrics?.dailyAcquisition || masterMetrics?.leadsDaily || [];
@@ -122,7 +142,14 @@ export default function MasterDashboard() {
                     <p className="text-xs font-medium text-slate-500 mt-1">Holistic view of all marketing automation channels & customer intelligence.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <DateRangePicker onUpdate={({ range }) => setDateRange(range)} />
+                    <DateRangePicker 
+                        value={dateRange} 
+                        onUpdate={({ range }) => {
+                            if (range?.from) {
+                                setDateRange(range);
+                            }
+                        }} 
+                    />
                 </div>
             </div>
 
@@ -132,25 +159,26 @@ export default function MasterDashboard() {
                     <MetricCard
                         title="Total Leads"
                         value={loading ? "..." : displayTotalLeads.toLocaleString()}
-                        change={masterMetrics?.oldestLeadDate ? `Since ${format(new Date(masterMetrics.oldestLeadDate), 'MMM d')}` : "Real-time"}
                         isUp={true}
                         icon={<Users className="h-6 w-6" />}
                         color="text-blue-600"
                         bg="bg-blue-50 text-blue-600 border-blue-100"
                         border="border-blue-200/80"
+                        info="Total leads acquired and active during the selected date range."
                     />
                 </div>
                 <div className="animate-fade-in-up stagger-2">
                     <MetricCard
                         title="Total Emails Sent"
                         value={loading ? "..." : displayEmailsSent.toLocaleString()}
-                        change="Real-time"
+                        change={displayEmailUniqueLeads > 0 ? `${displayEmailReplyRate}% Response Rate` : "Real-time"}
                         isUp={true}
-                        icon={<TrendingUp className="h-6 w-6" />}
+                        icon={<Mail className="h-6 w-6" />}
                         color="text-emerald-600"
                         bg="bg-emerald-50 text-emerald-600 border-emerald-100"
                         border="border-emerald-200/80"
-                        onClick={() => router.push('/dashboard/email/sent')}
+                        onClick={() => router.push('/dashboard/email')}
+                        info={`Total unique leads contacted: ${displayEmailUniqueLeads.toLocaleString()} | Leads replied: ${displayEmailLeadReplies.toLocaleString()} | Response rate: ${displayEmailReplyRate}%`}
                     />
                 </div>
                 <div className="animate-fade-in-up stagger-3">
@@ -177,7 +205,7 @@ export default function MasterDashboard() {
                         bg="bg-indigo-50 text-indigo-600 border-indigo-100"
                         border="border-indigo-200/80"
                         onClick={() => setIsRepliesModalOpen(true)}
-                        info="This rate is calculated as (Total Replies / Total Outreach across Email & WhatsApp)."
+                        info={`Total unique leads who replied across channels: ${displayReplies.toLocaleString()} | Reply rate: ${displayReplyRate}%`}
                         action={<Button
                             variant="ghost"
                             size="icon"
@@ -212,13 +240,16 @@ export default function MasterDashboard() {
                     </p>
                     <div className="flex items-center gap-3 pt-1 text-xs text-slate-700 flex-wrap font-medium">
                         <span className="flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60">
-                            <DollarSign className="h-3.5 w-3.5 text-emerald-600" /> AED 3,072,278.20 Invoiced
+                            <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
+                            {loading ? "..." : `AED ${displayEworksInvoiced.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} Invoiced
                         </span>
                         <span className="flex items-center gap-1 font-bold text-violet-700 bg-violet-50 px-2.5 py-1 rounded-lg border border-violet-200/60">
-                            <Wrench className="h-3.5 w-3.5 text-violet-600" /> 252 Active Jobs
+                            <Wrench className="h-3.5 w-3.5 text-violet-600" />
+                            {loading ? "..." : `${displayEworksActiveJobs.toLocaleString()}`} Active Jobs
                         </span>
                         <span className="flex items-center gap-1 font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200/60">
-                            <FileText className="h-3.5 w-3.5 text-indigo-600" /> 852 Pending Quotes
+                            <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                            {loading ? "..." : `${displayEworksPendingQuotes.toLocaleString()}`} Pending Quotes
                         </span>
                     </div>
                 </div>
@@ -385,8 +416,8 @@ export default function MasterDashboard() {
 function MetricCard({ title, value, change, isUp, icon, color, bg, border, onClick, action, info }: {
     title: string;
     value: string;
-    change: string;
-    isUp: boolean;
+    change?: string;
+    isUp?: boolean;
     icon: React.ReactNode;
     color: string;
     bg: string;
@@ -440,11 +471,13 @@ function MetricCard({ title, value, change, isUp, icon, color, bg, border, onCli
                 </div>
 
                 {/* Bottom Status Tag */}
-                <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 whitespace-nowrap">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                        {change}
-                    </span>
+                <div className="flex items-center justify-between min-h-[20px]">
+                    {change ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                            {change}
+                        </span>
+                    ) : <div />}
                     {onClick && (
                         <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-violet-600 group-hover:translate-x-0.5 transition-all" />
                     )}

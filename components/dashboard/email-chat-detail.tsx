@@ -21,6 +21,8 @@ import { useData } from "@/context/DataContext";
 import { FollowUpBossButton } from "@/components/ui/followup-boss-button";
 
 import { parseMsgDate, cleanMessageContent } from "@/lib/reply-utils";
+import { ChatAttachmentPreview, MessageAttachment } from "@/components/chat/chat-attachment-preview";
+import { linkAttachmentsToMessages } from "@/lib/attachment-utils";
 
 function parseEmailContent(content: string, note?: string): any[] {
     if (!content && !note) return [];
@@ -128,6 +130,7 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
     const [lead, setLead] = useState<any | null>(initialLead || null);
     const [loading, setLoading] = useState(true);
     const [messages, setMessages] = useState<any[]>([]);
+    const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
     const [copied, setCopied] = useState(false);
 
     const fetchLeadAndEmailThread = async () => {
@@ -136,9 +139,28 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
             let foundLead = initialLead;
             if (!foundLead && leadId) {
                 foundLead = allLeads.find((l: any) =>
+                    String(l.customer_id || '').toLowerCase() === String(leadId).toLowerCase() ||
                     String(l["Lead ID"] || l.id) === String(leadId) ||
                     String(l.Email || l.email) === String(leadId)
                 );
+            }
+
+            if (!foundLead && leadId) {
+                try {
+                    const emailRes = await fetch('/api/email');
+                    if (emailRes.ok) {
+                        const emailData = await emailRes.json();
+                        const emailLeads = emailData.email_leads || [];
+                        foundLead = emailLeads.find((l: any) =>
+                            String(l.customer_id || '').toLowerCase() === String(leadId).toLowerCase() ||
+                            String(l.id || '').toLowerCase() === String(leadId).toLowerCase() ||
+                            String(l.recipient_address || '').toLowerCase() === String(leadId).toLowerCase() ||
+                            String(l.Email || l.email || '').toLowerCase() === String(leadId).toLowerCase()
+                        );
+                    }
+                } catch (e) {
+                    console.error("Error fetching email leads in EmailChatDetail:", e);
+                }
             }
 
             if (!foundLead && leadId) {
@@ -154,6 +176,7 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                             ...(data.activity_leads || []),
                         ];
                         foundLead = allFetched.find((l: any) =>
+                            String(l.customer_id || '').toLowerCase() === String(leadId).toLowerCase() ||
                             String(l["Lead ID"] || l.id) === String(leadId) ||
                             String(l.Email || l.email) === String(leadId)
                         );
@@ -281,6 +304,26 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
             });
 
             setMessages(uniqueMsgs);
+
+            const effectiveCustId =
+                foundLead?.customer_id ||
+                (foundLead?.messages && foundLead.messages.find((m: any) => m.customer_id)?.customer_id) ||
+                (uniqueMsgs && uniqueMsgs.find((m: any) => m.customer_id)?.customer_id) ||
+                foundLead?.id ||
+                foundLead?.lead_email ||
+                leadId;
+            const effectiveEworksId = foundLead?.eworks_customer_id;
+
+            try {
+                const attUrl = `/api/messages/attachments?customer_id=${encodeURIComponent(effectiveCustId)}${effectiveEworksId ? `&eworks_customer_id=${effectiveEworksId}` : ''}`;
+                const attRes = await fetch(attUrl);
+                if (attRes.ok) {
+                    const attData = await attRes.json();
+                    setAttachments(attData.attachments || []);
+                }
+            } catch (err) {
+                console.error("Error fetching attachments in EmailChatDetail:", err);
+            }
         } catch (err) {
             console.error('[EmailChatDetail]', err);
         } finally {
@@ -292,12 +335,32 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
         fetchLeadAndEmailThread();
     }, [leadId, initialLead]);
 
+    // Link attachments to messages (matching by exact message_id or AI summary content)
+    const messagesWithAttachments = React.useMemo(() => {
+        const { messagesWithAttachments: mapped, unlinkedAttachments } = linkAttachmentsToMessages(messages, attachments);
+        if (unlinkedAttachments.length > 0 && mapped.length > 0) {
+            const lastInbound = [...mapped].reverse().find(m => m.type === 'user');
+            if (lastInbound) {
+                lastInbound.attachments = [...(lastInbound.attachments || []), ...unlinkedAttachments];
+            } else {
+                mapped[mapped.length - 1].attachments = [
+                    ...(mapped[mapped.length - 1].attachments || []),
+                    ...unlinkedAttachments
+                ];
+            }
+        }
+        return mapped;
+    }, [messages, attachments]);
+
     const copyShareLink = () => {
-        // Use eworks_customer_id or lead_email as primary share identifier
-        const eworksId = (lead as any)?.eworks_customer_id || (lead as any)?.eworks_id;
-        const rawEmail = lead?.["lead_email"] || lead?.["Email"] || lead?.email || leadId;
-        const shareId = eworksId || String(rawEmail).trim() || leadId;
-        const shareUrl = `${window.location.origin}/share/email/${encodeURIComponent(shareId)}`;
+        // Use customer_id from messages table as the unique factor for the URL
+        const msgCustomerId =
+            (lead as any)?.customer_id ||
+            (lead as any)?.messages?.find((m: any) => m.customer_id)?.customer_id ||
+            (messages && messages.find((m: any) => m.customer_id)?.customer_id) ||
+            lead?.id ||
+            leadId;
+        const shareUrl = `${window.location.origin}/share/email/${encodeURIComponent(msgCustomerId)}`;
         navigator.clipboard.writeText(shareUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -306,12 +369,12 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
     const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        if (messages.length > 0) {
+        if (messagesWithAttachments.length > 0) {
             setTimeout(() => {
                 messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
         }
-    }, [messages]);
+    }, [messagesWithAttachments]);
 
     const leadName = lead?.["Name"] || lead?.name || leadId || "Unknown Contact";
     const leadEmail = lead?.["Email"] || lead?.email || "";
@@ -375,14 +438,14 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                     <div className="flex items-center justify-center h-48 text-slate-400 text-sm">
                         <RefreshCw className="h-5 w-5 animate-spin mr-2 text-blue-500" /> Loading Email thread...
                     </div>
-                ) : messages.length === 0 ? (
+                ) : messagesWithAttachments.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 text-slate-400 text-sm gap-2">
                         <Mail className="h-8 w-8 opacity-30 text-blue-500" />
                         <span>No Email activity recorded for this contact yet.</span>
                     </div>
                 ) : (
                     <>
-                        {messages.map((msg, index) => {
+                        {messagesWithAttachments.map((msg, index) => {
                             const isInbound = msg.type === 'user' || String(msg.direction || '').toUpperCase() === 'INBOUND';
                             const text = msg.content;
                             const formattedDate = msg.date
@@ -429,6 +492,12 @@ export function EmailChatDetail({ leadId, onClose, initialLead }: EmailChatDetai
                                             )}
                                         </div>
                                         <p className="whitespace-pre-wrap leading-relaxed font-sans font-normal">{text}</p>
+                                        {msg.attachments && msg.attachments.length > 0 && (
+                                            <ChatAttachmentPreview
+                                                attachments={msg.attachments}
+                                                isDarkBubble={!isInbound}
+                                            />
+                                        )}
                                     </div>
 
                                     {!isInbound && (
