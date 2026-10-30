@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Mail, MessageCircle, Mic, LogOut, ChevronDown, Wallet, BarChart2, Users, Send, Key, ExternalLink, Smartphone, Activity, Briefcase } from "lucide-react";
+import { LayoutDashboard, Mail, MessageCircle, Mic, LogOut, ChevronDown, Wallet, BarChart2, Users, Send, Key, ExternalLink, Smartphone, Activity, Briefcase, Sparkles, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import {
@@ -23,6 +23,16 @@ const sidebarItems = [
         title: "Dashboard",
         href: "/dashboard",
         icon: LayoutDashboard,
+    },
+    {
+        title: "AI Content Studio",
+        href: "/dashboard/ai-content",
+        icon: Sparkles,
+    },
+    {
+        title: "Ads Manager",
+        href: "/dashboard/ads-manager",
+        icon: Megaphone,
     },
     {
         title: "eWorks CRM",
@@ -69,6 +79,8 @@ function DashboardContent({
             icon: LayoutDashboard,
             items: [
                 { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+                { title: "AI Content Studio", href: "/dashboard/ai-content", icon: Sparkles },
+                { title: "Ads Manager", href: "/dashboard/ads-manager", icon: Megaphone },
                 { title: "eWorks Operations", href: "/dashboard/eworks", icon: Briefcase },
                 { title: "Email Marketing", href: "/dashboard/email", icon: Mail },
                 { title: "WhatsApp CRM", href: "/dashboard/whatsapp", icon: MessageCircle },
@@ -146,6 +158,12 @@ function DashboardContent({
                             <DropdownMenuContent align="start" className="w-[220px]">
                                 <DropdownMenuItem onClick={() => router.push("/dashboard")}>
                                     <LayoutDashboard className="mr-2 h-4 w-4 text-violet-600" /> Master Overview
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => router.push("/dashboard/ai-content")}>
+                                    <Sparkles className="mr-2 h-4 w-4 text-violet-600" /> AI Content Studio
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => router.push("/dashboard/ads-manager")}>
+                                    <Megaphone className="mr-2 h-4 w-4 text-violet-600" /> Ads Manager
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => router.push("/dashboard/eworks")}>
                                     <Briefcase className="mr-2 h-4 w-4 text-violet-600" /> eWorks Operations
