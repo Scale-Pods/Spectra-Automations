@@ -16,7 +16,10 @@ import {
     SPECTRA_DUBAI_PRESETS,
     STUDIO_AI_MODELS,
     StudioModelOption,
-    calculateJobCost
+    calculateJobCost,
+    VIDEO_AI_MODELS,
+    VideoModelOption,
+    calculateVideoJobCost
 } from "@/lib/spectra-maintenance-data";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,7 +68,12 @@ import {
     Coins,
     Receipt,
     ArrowLeft,
-    Lock
+    Lock,
+    Play,
+    Film,
+    Mic,
+    VolumeX,
+    Captions
 } from "lucide-react";
 
 export default function AIContentStudioPage() {
@@ -121,16 +129,32 @@ export default function AIContentStudioPage() {
         }
     ]);
 
-    // Video-specific specifications
-    const [hasBackgroundMusic, setHasBackgroundMusic] = useState(true);
-    const [backgroundMusicTrack, setBackgroundMusicTrack] = useState('energetic_tech');
-    const [hasVoiceover, setHasVoiceover] = useState(true);
-    const [voiceoverAccent, setVoiceoverAccent] = useState('uae_english');
+    // Video-specific pipeline state (Veo engines, shots & workflows)
+    const [videoEngine, setVideoEngine] = useState<'veo-3.1-fast' | 'veo-3.1-lite' | 'veo-3.1-standard'>('veo-3.1-fast');
+    const [videoShotCount, setVideoShotCount] = useState<number>(3);
+    const [videoDurationS, setVideoDurationS] = useState<number>(4);
+    const [videoResolution, setVideoResolution] = useState<'720p' | '1080p' | '4k'>('1080p');
+    const [videoWantsVoiceover, setVideoWantsVoiceover] = useState<boolean>(true);
+    const [videoWantsMusic, setVideoWantsMusic] = useState<boolean>(false);
+    const [videoWantsSubtitles, setVideoWantsSubtitles] = useState<boolean>(true);
+    const [videoSubtitleStyle, setVideoSubtitleStyle] = useState<'bold_yellow' | 'clean_white' | 'karaoke_pop'>('bold_yellow');
+    const [activeVideoJob, setActiveVideoJob] = useState<any>(null);
+    const [isGeneratingVideoBrief, setIsGeneratingVideoBrief] = useState<boolean>(false);
+    const [isRenderingVideo, setIsRenderingVideo] = useState<boolean>(false);
+    const [isRefreshingVideoStatus, setIsRefreshingVideoStatus] = useState<boolean>(false);
+    const [videoStatusFeedback, setVideoStatusFeedback] = useState<string | null>(null);
+    const [recentVideoJobs, setRecentVideoJobs] = useState<any[]>([]);
+    const [historyFilter, setHistoryFilter] = useState<'all' | 'images' | 'videos'>('all');
+    const [editingShotIdx, setEditingShotIdx] = useState<number | null>(null);
 
     // 5. Webhook & Job Pipeline State
     const [webhookUrl, setWebhookUrl] = useState('');
+    const [videoBriefWebhookUrl, setVideoBriefWebhookUrl] = useState('');
+    const [videoRenderWebhookUrl, setVideoRenderWebhookUrl] = useState('');
     const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
     const [tempWebhookUrl, setTempWebhookUrl] = useState('');
+    const [tempVideoBriefWebhookUrl, setTempVideoBriefWebhookUrl] = useState('');
+    const [tempVideoRenderWebhookUrl, setTempVideoRenderWebhookUrl] = useState('');
 
     // Active Job & Generation Lifecycle
     const [isGenerating, setIsGenerating] = useState(false);
@@ -157,8 +181,9 @@ export default function AIContentStudioPage() {
         return `/api/ai/image-proxy?url=${encodeURIComponent(corrected)}`;
     };
 
-    // Polling interval ref
+    // Polling interval refs
     const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const videoPollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     // 6. Generated Copy Output for Spectra Dubai
     const [generatedOutput, setGeneratedOutput] = useState<any>({
@@ -197,6 +222,25 @@ export default function AIContentStudioPage() {
         return calculateJobCost(activeJob.model || selectedModel, imgCount);
     }, [activeJob, selectedModel, variantCount, activeModelObj, format, carouselSlides]);
 
+    // Computed Video Job Exact Cost (Veo rates per second in USD & AED)
+    const activeVideoCost = useMemo(() => {
+        if (activeVideoJob && activeVideoJob.estimated_cost_usd) {
+            const usd = Number(activeVideoJob.estimated_cost_usd);
+            const aed = +(usd * 3.6725).toFixed(2);
+            return {
+                rateUsd: 0.12,
+                rateAed: 0.44,
+                totalDurationS: (activeVideoJob.shots_json?.length || videoShotCount) * videoDurationS,
+                totalUsd: usd,
+                totalAed: aed,
+                formattedRate: `$0.12 (AED 0.44)/s`,
+                formattedTotal: `$${usd.toFixed(2)} (AED ${aed.toFixed(2)})`,
+                modelName: activeVideoJob.engine || videoEngine
+            };
+        }
+        return calculateVideoJobCost(videoEngine, videoResolution, videoShotCount, videoDurationS);
+    }, [activeVideoJob, videoEngine, videoResolution, videoShotCount, videoDurationS]);
+
     // Ensure variant count stays within selected model capability
     useEffect(() => {
         if (activeModelObj.maxVariants === 1 && variantCount > 1) {
@@ -204,28 +248,49 @@ export default function AIContentStudioPage() {
         }
     }, [activeModelObj, variantCount]);
 
-    // Load saved webhook URL & recent jobs on mount
+    // Load saved webhook URLs & recent jobs on mount
     useEffect(() => {
         const savedUrl = localStorage.getItem("SPECTRA_STUDIO_WEBHOOK_URL");
+        const savedBrief = localStorage.getItem("SPECTRA_VIDEO_BRIEF_WEBHOOK_URL");
+        const savedRender = localStorage.getItem("SPECTRA_VIDEO_RENDER_WEBHOOK_URL");
+
         if (savedUrl) {
             setWebhookUrl(savedUrl);
             setTempWebhookUrl(savedUrl);
         }
+        if (savedBrief) {
+            setVideoBriefWebhookUrl(savedBrief);
+            setTempVideoBriefWebhookUrl(savedBrief);
+        } else if (savedUrl) {
+            const derived = savedUrl.replace(/spectra-studio-generate/g, 'spectra-video-brief');
+            setVideoBriefWebhookUrl(derived);
+            setTempVideoBriefWebhookUrl(derived);
+        }
+        if (savedRender) {
+            setVideoRenderWebhookUrl(savedRender);
+            setTempVideoRenderWebhookUrl(savedRender);
+        } else if (savedUrl) {
+            const derived = savedUrl.replace(/spectra-studio-generate/g, 'spectra-video-render');
+            setVideoRenderWebhookUrl(derived);
+            setTempVideoRenderWebhookUrl(derived);
+        }
+
         fetchRecentJobs();
+        fetchRecentVideoJobs();
 
         return () => {
             if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+            if (videoPollingIntervalRef.current) clearInterval(videoPollingIntervalRef.current);
         };
     }, []);
 
-    // Fetch recent jobs from API
+    // Fetch recent studio image jobs from API
     const fetchRecentJobs = async () => {
         try {
             const res = await fetch('/api/ai/studio-jobs?limit=20');
             const data = await res.json();
             if (data.success && Array.isArray(data.jobs)) {
                 setRecentJobs(data.jobs);
-                // If there is a completed job and no active job yet, select it
                 if (!activeJob && data.jobs.length > 0) {
                     const latest = data.jobs[0];
                     setActiveJob(latest);
@@ -239,11 +304,27 @@ export default function AIContentStudioPage() {
                 }
             }
         } catch (e) {
-            console.warn("Failed to load recent jobs", e);
+            console.warn("Failed to load recent studio jobs", e);
         }
     };
 
-    // Poll job status until done or failed
+    // Fetch recent video jobs from API
+    const fetchRecentVideoJobs = async () => {
+        try {
+            const res = await fetch('/api/ai/video-jobs?limit=20');
+            const data = await res.json();
+            if (data.success && Array.isArray(data.jobs)) {
+                setRecentVideoJobs(data.jobs);
+                if (!activeVideoJob && data.jobs.length > 0) {
+                    setActiveVideoJob(data.jobs[0]);
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to load recent video jobs", e);
+        }
+    };
+
+    // Poll studio image job status until done or failed
     const startPollingJob = (jobId: string) => {
         if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
 
@@ -272,6 +353,73 @@ export default function AIContentStudioPage() {
                 console.error("Polling error for job", jobId, err);
             }
         }, 2500);
+    };
+
+    // Poll video job status until completed or failed
+    const startPollingVideoJob = (jobId: string) => {
+        if (videoPollingIntervalRef.current) clearInterval(videoPollingIntervalRef.current);
+
+        videoPollingIntervalRef.current = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/ai/video-jobs?id=${jobId}&sync=true`);
+                const data = await res.json();
+                if (data.success && data.job) {
+                    const current = data.job;
+                    setActiveVideoJob(current);
+
+                    const finalUrl = current.output_video_url || current.final_video_url;
+                    if (current.status === 'completed' || current.status === 'done' || finalUrl) {
+                        setIsRenderingVideo(false);
+                        if (videoPollingIntervalRef.current) clearInterval(videoPollingIntervalRef.current);
+                        fetchRecentVideoJobs();
+                    } else if (current.status === 'failed') {
+                        setIsRenderingVideo(false);
+                        if (videoPollingIntervalRef.current) clearInterval(videoPollingIntervalRef.current);
+                        fetchRecentVideoJobs();
+                    }
+                }
+            } catch (err) {
+                console.error("Polling error for video job", jobId, err);
+            }
+        }, 3000);
+    };
+
+    // Explicitly refresh status from Railway video engine with dynamic jobId
+    const handleRefreshVideoStatus = async (targetJobId?: string) => {
+        const jId = targetJobId || activeVideoJob?.id;
+        if (!jId) return;
+        setIsRefreshingVideoStatus(true);
+        setVideoStatusFeedback(null);
+        try {
+            const res = await fetch(`/api/ai/video-jobs?id=${jId}&sync=true`);
+            const data = await res.json();
+            if (data.success && data.job) {
+                const updated = data.job;
+                setActiveVideoJob(updated);
+                setRecentVideoJobs(prev => prev.map(j => j.id === updated.id ? updated : j));
+
+                const finalUrl = updated.output_video_url || updated.final_video_url;
+                if (updated.status === 'completed' || finalUrl) {
+                    setIsRenderingVideo(false);
+                    setVideoStatusFeedback('Video render completed! Ready to preview & download.');
+                } else if (updated.status === 'rendering') {
+                    const pct = updated.render_progress?.percent;
+                    setVideoStatusFeedback(pct !== undefined ? `Rendering in progress: ${pct}% complete` : 'Rendering clips on Railway Veo engine...');
+                } else if (updated.status === 'failed') {
+                    setIsRenderingVideo(false);
+                    setVideoStatusFeedback(`Render failed: ${updated.error_detail || 'Please check engine logs'}`);
+                } else {
+                    setVideoStatusFeedback(`Status updated: ${updated.status || 'Success'}`);
+                }
+                setTimeout(() => setVideoStatusFeedback(null), 5000);
+            }
+        } catch (err) {
+            console.error('Failed to refresh video status:', err);
+            setVideoStatusFeedback('Could not query video engine. Retrying in background...');
+            setTimeout(() => setVideoStatusFeedback(null), 4000);
+        } finally {
+            setIsRefreshingVideoStatus(false);
+        }
     };
 
     // Adjust resolution automatically when format changes
@@ -349,10 +497,8 @@ export default function AIContentStudioPage() {
             if (preset.imageStyle) setImageStyle(preset.imageStyle);
             if (preset.imageLighting) setImageLighting(preset.imageLighting);
         } else {
-            setHasBackgroundMusic(preset.audio !== 'none');
-            if (preset.audio && preset.audio !== 'none') setBackgroundMusicTrack(preset.audio);
-            setHasVoiceover(preset.voiceover !== 'none');
-            if (preset.voiceover && preset.voiceover !== 'none') setVoiceoverAccent(preset.voiceover);
+            setVideoWantsMusic(preset.audio !== 'none');
+            setVideoWantsVoiceover(preset.voiceover !== 'none');
         }
 
         const service = DUBAI_MAINTENANCE_SERVICES.find(s => s.id === preset.serviceId);
@@ -377,11 +523,144 @@ export default function AIContentStudioPage() {
         setTimeout(() => setCopiedKey(null), 2000);
     };
 
-    // Save Webhook URL
+    // Save Webhook URLs
     const saveWebhookSettings = () => {
         setWebhookUrl(tempWebhookUrl);
         localStorage.setItem("SPECTRA_STUDIO_WEBHOOK_URL", tempWebhookUrl);
+
+        const briefUrlToSave = tempVideoBriefWebhookUrl.trim() || tempWebhookUrl.replace(/spectra-studio-generate/g, 'spectra-video-brief');
+        const renderUrlToSave = tempVideoRenderWebhookUrl.trim() || tempWebhookUrl.replace(/spectra-studio-generate/g, 'spectra-video-render');
+
+        setVideoBriefWebhookUrl(briefUrlToSave);
+        localStorage.setItem("SPECTRA_VIDEO_BRIEF_WEBHOOK_URL", briefUrlToSave);
+
+        setVideoRenderWebhookUrl(renderUrlToSave);
+        localStorage.setItem("SPECTRA_VIDEO_RENDER_WEBHOOK_URL", renderUrlToSave);
+
         setIsWebhookModalOpen(false);
+    };
+
+    // -------------------------------------------------------------
+    // VIDEO WORKFLOW 1: GENERATE VIDEO BRIEF & VOICEOVER
+    // -------------------------------------------------------------
+    const handleGenerateVideoBrief = async () => {
+        setIsGeneratingVideoBrief(true);
+        setWebhookResult(null);
+
+        const currentService = DUBAI_MAINTENANCE_SERVICES.find(s => s.id === selectedServiceId);
+        const aspectStr = resolution === '1080x1080' ? '1:1' : resolution === '1080x1920' ? '9:16' : '9:16';
+
+        try {
+            const res = await fetch('/api/ai/video-jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'create_brief',
+                    topic: prompt.trim() || `${currentService?.name || 'AC Deep Servicing'} in ${selectedLocation}`,
+                    platform: platforms[0] || 'instagram',
+                    aspectRatio: aspectStr,
+                    shotCount: videoShotCount,
+                    durationS: videoDurationS,
+                    wantsVoiceover: videoWantsVoiceover,
+                    wantsMusic: videoWantsMusic,
+                    wantsSubtitles: videoWantsSubtitles,
+                    subtitleStyle: videoSubtitleStyle,
+                    engine: videoEngine,
+                    resolution: videoResolution,
+                    videoType: 'generated_clips',
+                    styleDirection: 'Cinematic, ultra-sharp 4K commercial lighting, clean Dubai villa interior',
+                    brandName: 'Spectra Property Maintenance Dubai',
+                    brandDescription: 'Dubai luxury villa & commercial HVAC, plumbing, and property care',
+                    briefWebhookUrl: videoBriefWebhookUrl.trim()
+                })
+            });
+
+            const data = await res.json();
+            if (data.success && data.job) {
+                setActiveVideoJob(data.job);
+                setActiveOutputTab('visual_assets');
+                setWebhookResult({
+                    success: true,
+                    message: data.webhookDispatched
+                        ? `Video brief created (#${data.job.id.slice(0, 8)}) and voiceover synthesized via n8n`
+                        : `Video brief & storyboard ready (#${data.job.id.slice(0, 8)}). Ready to render clips.`
+                });
+                fetchRecentVideoJobs();
+            } else {
+                setWebhookResult({
+                    success: false,
+                    error: data.error || 'Failed to generate video brief'
+                });
+            }
+        } catch (err: any) {
+            console.error('Video brief creation error:', err);
+            setWebhookResult({
+                success: false,
+                error: err.message || 'Failed to contact video brief service'
+            });
+        } finally {
+            setIsGeneratingVideoBrief(false);
+        }
+    };
+
+    // -------------------------------------------------------------
+    // VIDEO WORKFLOW 2: RENDER FINAL VIDEO WITH VEO ENGINE
+    // -------------------------------------------------------------
+    const handleRenderVideo = async (jobIdToRender?: string) => {
+        const targetJobId = jobIdToRender || activeVideoJob?.id;
+        if (!targetJobId) return;
+
+        setIsRenderingVideo(true);
+        try {
+            const res = await fetch('/api/ai/video-jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'render',
+                    jobId: targetJobId,
+                    wantsSubtitles: videoWantsSubtitles,
+                    subtitleStyle: videoSubtitleStyle,
+                    shots_json: activeVideoJob?.shots_json,
+                    voiceover_script: activeVideoJob?.voiceover_script,
+                    renderWebhookUrl: videoRenderWebhookUrl.trim()
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                setActiveVideoJob((prev: any) => prev ? ({ ...prev, status: 'rendering' }) : prev);
+                setWebhookResult({
+                    success: true,
+                    message: `Video render started (#${targetJobId.slice(0, 8)}). Veo AI generating clips and stitching final MP4.`
+                });
+                startPollingVideoJob(targetJobId);
+            } else {
+                setWebhookResult({
+                    success: false,
+                    error: data.error || 'Failed to trigger video render'
+                });
+                setIsRenderingVideo(false);
+            }
+        } catch (err: any) {
+            console.error('Video render trigger error:', err);
+            setWebhookResult({
+                success: false,
+                error: err.message || 'Failed to contact render service'
+            });
+            setIsRenderingVideo(false);
+        }
+    };
+
+    // Update single shot prompt or text in active video job
+    const handleUpdateShot = (shotIdx: number, field: 'prompt' | 'onScreenText', val: string) => {
+        if (!activeVideoJob || !Array.isArray(activeVideoJob.shots_json)) return;
+        const updated = activeVideoJob.shots_json.map((s: any, idx: number) => {
+            if (idx === shotIdx) {
+                return { ...s, [field]: val };
+            }
+            return s;
+        });
+        setActiveVideoJob({ ...activeVideoJob, shots_json: updated });
     };
 
     // Add or remove carousel slide
@@ -956,19 +1235,274 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         <span className="w-5 h-5 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-extrabold">
                                             2
                                         </span>
-                                        AI Model & Technical Direction
+                                        {isVideoFormat ? 'AI Video Engine & Shot Architecture' : 'AI Model & Technical Direction'}
                                     </CardTitle>
                                     <CardDescription className="text-xs text-slate-500 mt-0.5">
-                                        Select generation engine, resolution, variants, and visual atmosphere.
+                                        {isVideoFormat 
+                                            ? 'Configure Google Veo video generation engine, clip duration & OpenAI TTS-1 voiceover.' 
+                                            : 'Select generation engine, resolution, variants, and visual atmosphere.'}
                                     </CardDescription>
                                 </div>
                                 <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                    {activeModelObj.priceEst}
+                                    {isVideoFormat ? `${activeVideoCost.formattedRate} · Est: ${activeVideoCost.formattedTotal}` : activeModelObj.priceEst}
                                 </span>
                             </CardHeader>
 
                             <CardContent className="p-5 space-y-4">
-                                {/* AI Model Selector with Provider Tabs & Balanced 2-Column Grid */}
+                                {isVideoFormat ? (
+                                    /* -------------------------------------------------------------
+                                       VIDEO FORMAT SPECS: VEO ENGINES, SHOTS & TIMINGS
+                                       ------------------------------------------------------------- */
+                                    <div className="space-y-4">
+                                        {/* Veo Video Engine Selection */}
+                                        <div className="space-y-2.5">
+                                            <div className="flex items-center justify-between">
+                                                <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                                    <Film className="h-3.5 w-3.5 text-violet-600" />
+                                                    <span>Google Veo Video Engine</span>
+                                                </Label>
+                                                <span className="text-[11px] text-slate-500 font-mono">
+                                                    Rate: {activeVideoCost.formattedRate}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                                {VIDEO_AI_MODELS.map((m) => {
+                                                    const isSelected = videoEngine === m.id;
+                                                    const rate = m.ratesUsd[videoResolution] ?? 0.12;
+                                                    const rateAed = +(rate * 3.6725).toFixed(2);
+                                                    return (
+                                                        <button
+                                                            key={m.id}
+                                                            type="button"
+                                                            onClick={() => setVideoEngine(m.id)}
+                                                            className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between min-h-[125px] relative group ${
+                                                                isSelected
+                                                                    ? 'bg-violet-50/90 border-violet-600 shadow-xs ring-2 ring-violet-500/20 text-slate-900'
+                                                                    : 'bg-white border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/80 text-slate-700'
+                                                            }`}
+                                                        >
+                                                            <div className="space-y-1.5">
+                                                                <div className="flex items-center justify-between gap-1.5">
+                                                                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider bg-violet-100 text-violet-700 border border-violet-200/70">
+                                                                        {m.badge || 'Google'}
+                                                                    </span>
+                                                                    {isSelected && <CheckCircle2 className="h-4 w-4 text-violet-600 flex-shrink-0" />}
+                                                                </div>
+                                                                <h4 className="text-xs font-bold text-slate-900">{m.name.replace('Google · ', '')}</h4>
+                                                                <p className="text-[11px] text-slate-500 leading-snug line-clamp-2">{m.desc}</p>
+                                                            </div>
+                                                            <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between text-[11px]">
+                                                                <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                                                                    ${rate.toFixed(2)} (AED {rateAed.toFixed(2)})/s
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Video Shot Specs & Timings */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                                            {/* Shot Count */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-xs font-bold text-slate-700">Clips / Shot Count</Label>
+                                                    <span className="text-[10px] text-slate-400 font-mono">1 to 6 shots</span>
+                                                </div>
+                                                <div className="grid grid-cols-4 gap-1.5">
+                                                    {[2, 3, 4, 6].map((cnt) => (
+                                                        <button
+                                                            key={cnt}
+                                                            type="button"
+                                                            onClick={() => setVideoShotCount(cnt)}
+                                                            className={`py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                                                                videoShotCount === cnt
+                                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-xs'
+                                                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                            }`}
+                                                        >
+                                                            {cnt} Shots
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Duration per clip */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-xs font-bold text-slate-700">Clip Duration</Label>
+                                                    <span className="text-[10px] text-slate-400 font-mono">Veo supported</span>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-1.5">
+                                                    {[4, 6, 8].map((sec) => (
+                                                        <button
+                                                            key={sec}
+                                                            type="button"
+                                                            onClick={() => setVideoDurationS(sec)}
+                                                            className={`py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                                                                videoDurationS === sec
+                                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-xs'
+                                                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                            }`}
+                                                        >
+                                                            {sec}s / clip
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Resolution */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-xs font-bold text-slate-700">Resolution (9:16)</Label>
+                                                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 rounded">
+                                                        Total: {videoShotCount * videoDurationS}s
+                                                    </span>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-1.5">
+                                                    {(['720p', '1080p', '4k'] as const).map((res) => (
+                                                        <button
+                                                            key={res}
+                                                            type="button"
+                                                            onClick={() => setVideoResolution(res)}
+                                                            className={`py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                                                                videoResolution === res
+                                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-xs'
+                                                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                            }`}
+                                                        >
+                                                            {res.toUpperCase()}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Audio, Narration & Subtitles Options */}
+                                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                {/* Option 1: OpenAI TTS-1 Voiceover */}
+                                                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className={`p-2 rounded-xl transition-colors flex-shrink-0 ${videoWantsVoiceover ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                            <Mic className="h-4 w-4" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <span className="text-xs font-bold text-slate-800 block truncate">OpenAI TTS-1 Voice</span>
+                                                            <span className="text-[10px] text-slate-400 block truncate">Synthesizes speech script</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        role="switch"
+                                                        aria-checked={videoWantsVoiceover}
+                                                        onClick={() => setVideoWantsVoiceover(!videoWantsVoiceover)}
+                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                            videoWantsVoiceover ? 'bg-emerald-600' : 'bg-slate-300'
+                                                        }`}
+                                                    >
+                                                        <span
+                                                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                videoWantsVoiceover ? 'translate-x-5' : 'translate-x-0'
+                                                            }`}
+                                                        />
+                                                    </button>
+                                                </div>
+
+                                                {/* Option 2: Background Music Track */}
+                                                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className={`p-2 rounded-xl transition-colors flex-shrink-0 ${videoWantsMusic ? 'bg-violet-100 text-violet-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                            <Music className="h-4 w-4" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <span className="text-xs font-bold text-slate-800 block truncate">Background Music</span>
+                                                            <span className="text-[10px] text-slate-400 block truncate">UAE lifestyle soundscape</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        role="switch"
+                                                        aria-checked={videoWantsMusic}
+                                                        onClick={() => setVideoWantsMusic(!videoWantsMusic)}
+                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                            videoWantsMusic ? 'bg-violet-600' : 'bg-slate-300'
+                                                        }`}
+                                                    >
+                                                        <span
+                                                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                videoWantsMusic ? 'translate-x-5' : 'translate-x-0'
+                                                            }`}
+                                                        />
+                                                    </button>
+                                                </div>
+
+                                                {/* Option 3: Dynamic Animated Subtitles */}
+                                                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className={`p-2 rounded-xl transition-colors flex-shrink-0 ${videoWantsSubtitles ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-500'}`}>
+                                                            <Captions className="h-4 w-4" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <span className="text-xs font-bold text-slate-800 block truncate">Burned-In Subtitles</span>
+                                                            <span className="text-[10px] text-slate-400 block truncate">Viral animated captions</span>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        role="switch"
+                                                        aria-checked={videoWantsSubtitles}
+                                                        onClick={() => setVideoWantsSubtitles(!videoWantsSubtitles)}
+                                                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                            videoWantsSubtitles ? 'bg-amber-500' : 'bg-slate-300'
+                                                        }`}
+                                                    >
+                                                        <span
+                                                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                                videoWantsSubtitles ? 'translate-x-5' : 'translate-x-0'
+                                                            }`}
+                                                        />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Subtitle Typography Preset Pills when enabled */}
+                                            {videoWantsSubtitles && (
+                                                <div className="flex flex-wrap items-center justify-between p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/70 text-xs text-amber-950 gap-2">
+                                                    <span className="font-semibold flex items-center gap-1.5 text-[11px]">
+                                                        <Captions className="h-3.5 w-3.5 text-amber-600" />
+                                                        <span>Subtitle Style:</span>
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        {[
+                                                            { id: 'bold_yellow', label: 'Bold Yellow (Reels Pop)' },
+                                                            { id: 'clean_white', label: 'Clean White (Modern)' },
+                                                            { id: 'karaoke_pop', label: 'Karaoke Pop' }
+                                                        ].map(st => (
+                                                            <button
+                                                                key={st.id}
+                                                                type="button"
+                                                                onClick={() => setVideoSubtitleStyle(st.id as any)}
+                                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                                                                    videoSubtitleStyle === st.id
+                                                                        ? 'bg-amber-500 text-white border-amber-600 shadow-2xs'
+                                                                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                                }`}
+                                                            >
+                                                                {st.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* -------------------------------------------------------------
+                                       IMAGE & CAROUSEL FORMAT SPECS
+                                       ------------------------------------------------------------- */
+                                    <div className="space-y-4">
                                 <div className="space-y-2.5">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -1277,92 +1811,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                     </div>
                                 )}
 
-                                {/* CONDITIONAL SECTION: FOR VIDEO & STORIES ONLY */}
-                                {isVideoFormat && (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-100">
-                                        {/* Background Music Toggle */}
-                                        <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between gap-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`p-2 rounded-xl transition-colors ${hasBackgroundMusic ? 'bg-violet-100 text-violet-700' : 'bg-slate-200 text-slate-500'}`}>
-                                                        <Music className="h-4 w-4" />
-                                                    </div>
-                                                    <span className="text-xs font-bold text-slate-800">Background Music</span>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    role="switch"
-                                                    aria-checked={hasBackgroundMusic}
-                                                    onClick={() => setHasBackgroundMusic(!hasBackgroundMusic)}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                                        hasBackgroundMusic ? 'bg-violet-600' : 'bg-slate-300'
-                                                    }`}
-                                                >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                            hasBackgroundMusic ? 'translate-x-5' : 'translate-x-0'
-                                                        }`}
-                                                    />
-                                                </button>
-                                            </div>
 
-                                            {hasBackgroundMusic && (
-                                                <select
-                                                    value={backgroundMusicTrack}
-                                                    onChange={(e) => setBackgroundMusicTrack(e.target.value)}
-                                                    className="w-full text-xs font-medium p-2 rounded-xl border border-slate-200 bg-white focus:border-violet-500"
-                                                >
-                                                    {AUDIO_OPTIONS.filter(a => a.id !== 'none').map((audio) => (
-                                                        <option key={audio.id} value={audio.id}>
-                                                            {audio.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </div>
-
-                                        {/* AI Voiceover Toggle */}
-                                        <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col justify-between gap-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`p-2 rounded-xl transition-colors ${hasVoiceover ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-                                                        <Volume2 className="h-4 w-4" />
-                                                    </div>
-                                                    <span className="text-xs font-bold text-slate-800">AI Voiceover Narration</span>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    role="switch"
-                                                    aria-checked={hasVoiceover}
-                                                    onClick={() => setHasVoiceover(!hasVoiceover)}
-                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                                        hasVoiceover ? 'bg-emerald-600' : 'bg-slate-300'
-                                                    }`}
-                                                >
-                                                    <span
-                                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                                            hasVoiceover ? 'translate-x-5' : 'translate-x-0'
-                                                        }`}
-                                                    />
-                                                </button>
-                                            </div>
-
-                                            {hasVoiceover && (
-                                                <select
-                                                    value={voiceoverAccent}
-                                                    onChange={(e) => setVoiceoverAccent(e.target.value)}
-                                                    className="w-full text-xs font-medium p-2 rounded-xl border border-slate-200 bg-white focus:border-emerald-500"
-                                                >
-                                                    {VOICEOVER_OPTIONS.filter(v => v.id !== 'none').map((vo) => (
-                                                        <option key={vo.id} value={vo.id}>
-                                                            {vo.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
 
                                 {/* Optional Reference Image URL (Image-to-Image / Restyle) */}
                                 <div className="pt-1">
@@ -1394,6 +1843,8 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         </div>
                                     )}
                                 </div>
+                            </div>
+                            )}
 
                                 {/* Step 2 Action Buttons */}
                                 <div className="pt-2 flex items-center justify-between border-t border-slate-100">
@@ -1401,9 +1852,9 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         type="button"
                                         variant="outline"
                                         onClick={() => setActiveStep(1)}
-                                        className="text-xs rounded-xl font-semibold border-slate-200 gap-1.5"
+                                        className="text-xs rounded-xl font-bold border-slate-200 text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 gap-1.5 shadow-2xs transition-all"
                                     >
-                                        <ArrowLeft className="h-3.5 w-3.5" />
+                                        <ArrowLeft className="h-3.5 w-3.5 text-slate-600" />
                                         <span>Back to Format</span>
                                     </Button>
 
@@ -1433,13 +1884,27 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         Step 2 Completed
                                     </span>
                                     <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                                        <span>{activeModelObj.name}</span>
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-mono font-medium border border-emerald-200/60">
-                                            {activeJobCost.formattedPerImage} / img
-                                        </span>
-                                        <span className="text-[10px] text-slate-400">
-                                            ({variantCount}x · {resolution})
-                                        </span>
+                                        {isVideoFormat ? (
+                                            <>
+                                                <span>{activeVideoCost.modelName}</span>
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-mono font-medium border border-emerald-200/60">
+                                                    {activeVideoCost.formattedRate}
+                                                </span>
+                                                <span className="text-[10px] text-slate-400">
+                                                    ({videoShotCount} shots · {videoDurationS}s/shot · {videoResolution} · {videoWantsSubtitles ? 'CC Subtitles' : 'No Subtitles'})
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>{activeModelObj.name}</span>
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-mono font-medium border border-emerald-200/60">
+                                                    {activeJobCost.formattedPerImage} / img
+                                                </span>
+                                                <span className="text-[10px] text-slate-400">
+                                                    ({variantCount}x · {resolution})
+                                                </span>
+                                            </>
+                                        )}
                                     </h4>
                                 </div>
                             </div>
@@ -1481,16 +1946,18 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         <span className="w-5 h-5 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-extrabold">
                                             3
                                         </span>
-                                        Creative Brief & Prompt
+                                        {isVideoFormat ? 'Video Storyboard Brief & Render' : 'Creative Brief & Prompt'}
                                     </CardTitle>
                                     <CardDescription className="text-xs text-slate-500 mt-0.5">
-                                        Describe your visual concept. GPT-4.1-mini will enhance it before rendering.
+                                        {isVideoFormat 
+                                            ? 'Enter campaign angle. Stage 1 synthesizes shot breakdown & voiceover; Stage 2 renders clips.' 
+                                            : 'Describe your visual concept. AI prompt enhancer can refine details before rendering.'}
                                     </CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
                                         <Receipt className="h-3 w-3 text-emerald-600" />
-                                        <span>Cost: {activeJobCost.formattedTotal}</span>
+                                        <span>Cost: {isVideoFormat ? activeVideoCost.formattedTotal : activeJobCost.formattedTotal}</span>
                                     </span>
                                 </div>
                             </CardHeader>
@@ -1651,32 +2118,141 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         <div className="flex items-center gap-1.5 text-xs text-slate-500">
                                             <span>Est. Job Total:</span>
                                             <span className="font-bold font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/70">
-                                                {activeJobCost.formattedTotal}
+                                                {isVideoFormat ? activeVideoCost.formattedTotal : activeJobCost.formattedTotal}
                                             </span>
                                         </div>
                                     </div>
 
-                                    <Button
-                                        onClick={handleGenerateAndDispatch}
-                                        disabled={isGenerating}
-                                        className="w-full h-12 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 hover:from-violet-700 hover:to-cyan-700 text-white font-bold rounded-2xl shadow-md shadow-violet-500/20 text-sm gap-2"
-                                    >
-                                        {isGenerating ? (
-                                            <>
-                                                <RefreshCw className="h-4 w-4 animate-spin" />
-                                                <span>
-                                                    {jobStatus === 'pending'
-                                                        ? 'Queueing Job in Supabase...'
-                                                        : 'n8n Worker Generating Images & Enhancing Prompt...'}
-                                                </span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Sparkles className="h-4 w-4" />
-                                                <span>Generate Visuals via n8n & Supabase</span>
-                                            </>
-                                        )}
-                                    </Button>
+                                    {isVideoFormat ? (
+                                        /* -------------------------------------------------------------
+                                           VIDEO ACTION BUTTONS (WORKFLOW 1 BRIEF & WORKFLOW 2 RENDER)
+                                           ------------------------------------------------------------- */
+                                        <div className="space-y-2">
+                                            {isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
+                                                <div className="space-y-2">
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => handleRefreshVideoStatus()}
+                                                        disabled={isRefreshingVideoStatus}
+                                                        className="w-full h-12 bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white font-bold rounded-2xl shadow-md text-sm gap-2"
+                                                    >
+                                                        <RefreshCw className={`h-4 w-4 ${isRefreshingVideoStatus ? 'animate-spin' : ''}`} />
+                                                        <span>{isRefreshingVideoStatus ? 'Checking Video Engine...' : 'Check Video Render Status (Railway)'}</span>
+                                                    </Button>
+                                                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
+                                                        <span>Rendering clips on Railway Veo engine...</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRefreshVideoStatus()}
+                                                            disabled={isRefreshingVideoStatus}
+                                                            className="text-cyan-600 hover:underline font-semibold"
+                                                        >
+                                                            Refresh Now
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed') ? (
+                                                <div className="space-y-2">
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setActiveOutputTab('visual_assets');
+                                                            handleRefreshVideoStatus();
+                                                        }}
+                                                        className="w-full h-12 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-white font-bold rounded-2xl shadow-md text-sm gap-2"
+                                                    >
+                                                        <CheckCircle className="h-4 w-4" />
+                                                        <span>Video Render Ready · View Reel in Studio</span>
+                                                    </Button>
+                                                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
+                                                        <span>Rendered with Google Veo AI</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleGenerateVideoBrief}
+                                                            disabled={isGeneratingVideoBrief}
+                                                            className="text-violet-600 hover:underline font-semibold"
+                                                        >
+                                                            Create New Brief
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (!activeVideoJob || activeVideoJob.status !== 'draft_ready') ? (
+                                                <Button
+                                                    onClick={handleGenerateVideoBrief}
+                                                    disabled={isGeneratingVideoBrief}
+                                                    className="w-full h-12 bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold rounded-2xl shadow-md shadow-violet-500/20 text-sm gap-2"
+                                                >
+                                                    {isGeneratingVideoBrief ? (
+                                                        <>
+                                                            <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                                                            <span>Workflow 1: Synthesizing Brief & Voiceover...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Zap className="h-4 w-4 text-amber-300" />
+                                                            <span>Generate Video Brief & Voiceover (Stage 1)</span>
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    <Button
+                                                        onClick={() => handleRenderVideo()}
+                                                        disabled={isRenderingVideo}
+                                                        className="w-full h-12 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-white font-bold rounded-2xl shadow-md shadow-emerald-500/20 text-sm gap-2"
+                                                    >
+                                                        {isRenderingVideo ? (
+                                                            <>
+                                                                <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                                                                <span>Workflow 2: Railway Veo Engine Rendering Video...</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Film className="h-4 w-4" />
+                                                                <span>Render Final Video with Veo Engine ({activeVideoCost.formattedTotal})</span>
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
+                                                        <span>Brief ready with {activeVideoJob.shots_json?.length || videoShotCount} shots</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleGenerateVideoBrief}
+                                                            disabled={isGeneratingVideoBrief}
+                                                            className="text-violet-600 hover:underline font-semibold"
+                                                        >
+                                                            Re-generate Brief
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        /* -------------------------------------------------------------
+                                           IMAGE / CAROUSEL PRIMARY GENERATE BUTTON
+                                           ------------------------------------------------------------- */
+                                        <Button
+                                            onClick={handleGenerateAndDispatch}
+                                            disabled={isGenerating}
+                                            className="w-full h-12 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 hover:from-violet-700 hover:to-cyan-700 text-white font-bold rounded-2xl shadow-md shadow-violet-500/20 text-sm gap-2"
+                                        >
+                                            {isGenerating ? (
+                                                <>
+                                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                                    <span>
+                                                        {jobStatus === 'pending'
+                                                            ? 'Queueing Job in Supabase...'
+                                                            : 'n8n Worker Generating Images & Enhancing Prompt...'}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Sparkles className="h-4 w-4" />
+                                                    <span>Generate Visuals via n8n & Supabase</span>
+                                                </>
+                                            )}
+                                        </Button>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
@@ -1698,48 +2274,114 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         Creative Production Output
                                     </CardTitle>
                                     <CardDescription className="text-[11px] text-slate-500">
-                                        {format.toUpperCase()} · {resolution} · {selectedModel}
+                                        {format.toUpperCase()} · {resolution} · {isVideoFormat ? (activeVideoJob?.engine || videoEngine) : selectedModel}
                                     </CardDescription>
                                 </div>
                             </div>
                             
                             {/* Live Job Status & Cost Badge */}
                             <div className="flex flex-wrap items-center gap-2">
-                                {activeJob?.status === 'done' && (
-                                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold shadow-2xs">
-                                        <Receipt className="h-3.5 w-3.5 text-emerald-600" />
-                                        <span>Job Cost: {activeJobCost.formattedTotal}</span>
-                                        {activeJobCost.count > 1 && (
-                                            <span className="text-[10px] text-emerald-600/80 font-normal">
-                                                ({activeJobCost.count} × {activeJobCost.formattedPerImage})
-                                            </span>
-                                        )}
-                                    </div>
+                                {isVideoFormat ? (
+                                    activeVideoJob && (
+                                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold shadow-2xs">
+                                            <Receipt className="h-3.5 w-3.5 text-emerald-600" />
+                                            <span>Est. Cost: {activeVideoCost.formattedTotal}</span>
+                                        </div>
+                                    )
+                                ) : (
+                                    activeJob?.status === 'done' && (
+                                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-bold shadow-2xs">
+                                            <Receipt className="h-3.5 w-3.5 text-emerald-600" />
+                                            <span>Job Cost: {activeJobCost.formattedTotal}</span>
+                                            {activeJobCost.count > 1 && (
+                                                <span className="text-[10px] text-emerald-600/80 font-normal">
+                                                    ({activeJobCost.count} × {activeJobCost.formattedPerImage})
+                                                </span>
+                                            )}
+                                        </div>
+                                    )
                                 )}
 
-                                {isGenerating ? (
-                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1.5">
-                                        <RefreshCw className="h-3 w-3 animate-spin text-violet-600" />
-                                        <span>Generating...</span>
-                                    </span>
-                                ) : activeJob?.status === 'done' ? (
-                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                                        <CheckCircle className="h-3 w-3 text-emerald-600" />
-                                        <span>Ready</span>
-                                    </span>
-                                ) : activeJob?.status === 'failed' ? (
-                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
-                                        <AlertCircle className="h-3 w-3 text-rose-600" />
-                                        <span>Failed</span>
-                                    </span>
+                                {isVideoFormat && activeVideoJob && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleRefreshVideoStatus()}
+                                        disabled={isRefreshingVideoStatus}
+                                        className="h-7 text-[11px] px-2.5 rounded-xl border-slate-200 hover:border-violet-300 text-slate-700 hover:text-violet-700 bg-white shadow-2xs gap-1.5 transition-all"
+                                        title="Fetch latest render status directly from Railway video engine"
+                                    >
+                                        <RefreshCw className={`h-3 w-3 ${isRefreshingVideoStatus ? 'animate-spin text-violet-600' : 'text-slate-500'}`} />
+                                        <span>{isRefreshingVideoStatus ? 'Checking...' : 'Refresh Video Status'}</span>
+                                    </Button>
+                                )}
+
+                                {isVideoFormat ? (
+                                    isGeneratingVideoBrief ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1.5">
+                                            <RefreshCw className="h-3 w-3 animate-spin text-violet-600" />
+                                            <span>Briefing...</span>
+                                        </span>
+                                    ) : isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-cyan-100 text-cyan-800 border border-cyan-200 flex items-center gap-1.5">
+                                            <RefreshCw className="h-3 w-3 animate-spin text-cyan-600" />
+                                            <span>Rendering Veo...</span>
+                                        </span>
+                                    ) : activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                                            <span>Video Ready</span>
+                                        </span>
+                                    ) : activeVideoJob?.status === 'draft_ready' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1">
+                                            <CheckCircle className="h-3 w-3 text-violet-600" />
+                                            <span>Brief Ready</span>
+                                        </span>
+                                    ) : (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
+                                            <Clock className="h-3 w-3 text-slate-500" />
+                                            <span>Draft</span>
+                                        </span>
+                                    )
                                 ) : (
-                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
-                                        <Clock className="h-3 w-3 text-slate-500" />
-                                        <span>Draft</span>
-                                    </span>
+                                    isGenerating ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1.5">
+                                            <RefreshCw className="h-3 w-3 animate-spin text-violet-600" />
+                                            <span>Generating...</span>
+                                        </span>
+                                    ) : activeJob?.status === 'done' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                                            <span>Ready</span>
+                                        </span>
+                                    ) : activeJob?.status === 'failed' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
+                                            <AlertCircle className="h-3 w-3 text-rose-600" />
+                                            <span>Failed</span>
+                                        </span>
+                                    ) : (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
+                                            <Clock className="h-3 w-3 text-slate-500" />
+                                            <span>Draft</span>
+                                        </span>
+                                    )
                                 )}
                             </div>
                         </CardHeader>
+
+                        {/* Status Feedback Banner */}
+                        {videoStatusFeedback && (
+                            <div className="mx-5 mt-3 p-2.5 rounded-xl bg-violet-50 border border-violet-200 text-violet-900 text-xs font-medium flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="h-4 w-4 text-violet-600 flex-shrink-0" />
+                                    <span>{videoStatusFeedback}</span>
+                                </div>
+                                <button type="button" onClick={() => setVideoStatusFeedback(null)} className="text-violet-400 hover:text-violet-700 text-xs font-bold px-1">
+                                    ✕
+                                </button>
+                            </div>
+                        )}
 
                         {/* Output Sub-Tabs */}
                         <div className="flex border-b border-slate-100 bg-slate-50/40 px-5 pt-2 gap-2 text-xs overflow-x-auto">
@@ -1752,12 +2394,20 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         : 'border-transparent text-slate-500 hover:text-slate-800'
                                 }`}
                             >
-                                <Camera className="h-3.5 w-3.5" />
-                                <span>AI Visual Assets</span>
-                                {activeJob?.image_urls && activeJob.image_urls.length > 0 && (
-                                    <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-violet-100 text-violet-700 text-[10px]">
-                                        {activeJob.image_urls.length}
-                                    </span>
+                                {isVideoFormat ? <Film className="h-3.5 w-3.5" /> : <Camera className="h-3.5 w-3.5" />}
+                                <span>{isVideoFormat ? 'Video Storyboard' : 'AI Visual Assets'}</span>
+                                {isVideoFormat ? (
+                                    activeVideoJob?.shots_json && (
+                                        <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-violet-100 text-violet-700 text-[10px]">
+                                            {activeVideoJob.shots_json.length} Shots
+                                        </span>
+                                    )
+                                ) : (
+                                    activeJob?.image_urls && activeJob.image_urls.length > 0 && (
+                                        <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-violet-100 text-violet-700 text-[10px]">
+                                            {activeJob.image_urls.length}
+                                        </span>
+                                    )
                                 )}
                             </button>
                             <button
@@ -1820,6 +2470,272 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             {/* TAB 0: AI VISUAL ASSETS (GENERATED IMAGES & CAROUSEL SLIDES) */}
                             {activeOutputTab === 'visual_assets' && (
                                 <div className="space-y-4">
+                                    {isVideoFormat ? (
+                                        /* -------------------------------------------------------------
+                                           VIDEO PRODUCTION TAB: STORYBOARD, AUDIO & FINAL RENDER
+                                           ------------------------------------------------------------- */
+                                        <div className="space-y-4">
+                                            {/* Progress State: Generating Brief or Rendering Video */}
+                                            {isGeneratingVideoBrief ? (
+                                                <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-200 text-center space-y-3">
+                                                    <div className="w-12 h-12 mx-auto rounded-2xl bg-violet-600 text-white flex items-center justify-center shadow-lg shadow-violet-500/30">
+                                                        <RefreshCw className="h-6 w-6 animate-spin text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-violet-950">
+                                                            Synthesizing Video Brief & Storyboard
+                                                        </h4>
+                                                        <p className="text-xs text-violet-700 mt-1 max-w-sm mx-auto">
+                                                            GPT-4o is crafting shot cinematography, pacing, on-screen copy & OpenAI TTS-1 voiceover...
+                                                        </p>
+                                                    </div>
+                                                    <div className="text-[11px] font-mono text-slate-500 bg-white/70 py-1.5 px-3 rounded-xl inline-block border border-violet-200">
+                                                        Workflow: spectra-video-brief
+                                                    </div>
+                                                </div>
+                                            ) : isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
+                                                <div className="p-6 rounded-2xl bg-gradient-to-br from-cyan-50 to-emerald-50 border border-cyan-200 text-center space-y-3.5">
+                                                    <div className="w-12 h-12 mx-auto rounded-2xl bg-cyan-600 text-white flex items-center justify-center shadow-lg shadow-cyan-500/30">
+                                                        <Film className="h-6 w-6 animate-pulse text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-bold text-cyan-950">
+                                                            Veo AI Rendering Video Clips
+                                                        </h4>
+                                                        <p className="text-xs text-cyan-800 mt-1 max-w-sm mx-auto">
+                                                            Railway render engine is generating {activeVideoJob?.shots_json?.length || videoShotCount} Veo clips and stitching audio via FFmpeg...
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Dynamic Render Progress from Railway */}
+                                                    {activeVideoJob?.render_progress && (
+                                                        <div className="max-w-xs mx-auto space-y-1.5 pt-1">
+                                                            <div className="flex items-center justify-between text-[11px] font-mono text-cyan-900">
+                                                                <span className="capitalize">{activeVideoJob.render_progress.stage || 'Rendering'}</span>
+                                                                <span className="font-bold">{activeVideoJob.render_progress.percent || 0}%</span>
+                                                            </div>
+                                                            <div className="w-full bg-cyan-200/60 rounded-full h-2 overflow-hidden">
+                                                                <div 
+                                                                    className="bg-cyan-600 h-2 rounded-full transition-all duration-500" 
+                                                                    style={{ width: `${activeVideoJob.render_progress.percent || 0}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                                                        <div className="text-[11px] font-mono text-slate-500 bg-white/80 py-1.5 px-3 rounded-xl border border-cyan-200">
+                                                            Workflow 2: spectra-video-render · #{activeVideoJob?.id?.slice(0, 8)}
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={() => handleRefreshVideoStatus()}
+                                                            disabled={isRefreshingVideoStatus}
+                                                            className="bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs h-8 px-3.5 rounded-xl shadow-xs gap-1.5"
+                                                        >
+                                                            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingVideoStatus ? 'animate-spin' : ''}`} />
+                                                            <span>{isRefreshingVideoStatus ? 'Checking Railway Engine...' : 'Check Render Status'}</span>
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url) ? (
+                                                /* FINAL RENDERED VIDEO PLAYER */
+                                                <div className="space-y-3">
+                                                    <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-950 shadow-md p-2">
+                                                        <video
+                                                            controls
+                                                            playsInline
+                                                            className="w-full rounded-xl aspect-[9/16] max-h-[500px] mx-auto bg-black"
+                                                            src={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
+                                                        />
+                                                        <div className="p-3 flex flex-wrap items-center justify-between gap-2">
+                                                            <div>
+                                                                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                                    <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                                                                    <span>Final Render Complete</span>
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+                                                                    {activeVideoJob.engine} · {activeVideoJob.resolution} · {
+                                                                        activeVideoJob.actual_cost_usd !== undefined && activeVideoJob.actual_cost_usd !== null
+                                                                            ? `Actual Cost: $${Number(activeVideoJob.actual_cost_usd).toFixed(2)} (AED ${(Number(activeVideoJob.actual_cost_usd) * 3.6725).toFixed(2)})`
+                                                                            : activeVideoCost.formattedTotal
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    onClick={() => handleRefreshVideoStatus()}
+                                                                    disabled={isRefreshingVideoStatus}
+                                                                    className="text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg h-8 px-2.5"
+                                                                    title="Re-check status and metrics from Railway engine"
+                                                                >
+                                                                    <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshingVideoStatus ? 'animate-spin text-cyan-400' : ''}`} />
+                                                                    <span>Sync</span>
+                                                                </Button>
+                                                                <a
+                                                                    href={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
+                                                                    download={`spectra-reel-${activeVideoJob.id.slice(0, 8)}.mp4`}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+                                                                >
+                                                                    <Download className="h-3.5 w-3.5" />
+                                                                    <span>Download MP4</span>
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+
+                                            {/* Storyboard Review & Action Section */}
+                                            {activeVideoJob ? (
+                                                <div className="space-y-4">
+                                                    {/* Stage 1 Draft Ready Banner */}
+                                                    {activeVideoJob.status === 'draft_ready' && !(activeVideoJob.output_video_url || activeVideoJob.final_video_url) && (
+                                                        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+                                                            <div className="flex items-center gap-2.5">
+                                                                <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                                                                <div>
+                                                                    <span className="text-xs font-bold text-emerald-950 block">
+                                                                        Stage 1 Complete: Video Storyboard & Voiceover Ready
+                                                                    </span>
+                                                                    <span className="text-[11px] text-emerald-700">
+                                                                        Review the shots below, edit any prompt or text, then render final video.
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <Button
+                                                                size="sm"
+                                                                onClick={() => handleRenderVideo()}
+                                                                disabled={isRenderingVideo}
+                                                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl h-8 px-3.5 gap-1.5 shadow-xs flex-shrink-0"
+                                                            >
+                                                                <Play className="h-3.5 w-3.5" />
+                                                                <span>Render Video ({activeVideoCost.formattedTotal})</span>
+                                                            </Button>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Voiceover Script & Audio Player */}
+                                                    {(activeVideoJob.voiceover_script || activeVideoJob.voiceover_url) && (
+                                                        <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                                                                    <Mic className="h-3.5 w-3.5 text-indigo-600" />
+                                                                    <span>Voiceover Narration (OpenAI TTS-1)</span>
+                                                                </span>
+                                                                {activeVideoJob.voiceover_url && (
+                                                                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                                                                        Audio Ready
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {activeVideoJob.voiceover_script && (
+                                                                <p className="text-xs text-indigo-900 leading-relaxed italic bg-white/70 p-2.5 rounded-xl border border-indigo-100">
+                                                                    "{activeVideoJob.voiceover_script}"
+                                                                </p>
+                                                            )}
+                                                            {activeVideoJob.voiceover_url && (
+                                                                <div className="pt-1">
+                                                                    <audio controls className="w-full h-8" src={activeVideoJob.voiceover_url} />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Shot-by-Shot Storyboard Cards */}
+                                                    <div className="space-y-2.5">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                                                <Film className="h-3.5 w-3.5 text-violet-600" />
+                                                                <span>Shot-by-Shot Storyboard ({activeVideoJob.shots_json?.length || 0} Clips)</span>
+                                                            </span>
+                                                            <span className="text-[11px] text-slate-500 font-mono">
+                                                                {activeVideoJob.engine || videoEngine} · {activeVideoJob.resolution || videoResolution}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                                                            {Array.isArray(activeVideoJob.shots_json) && activeVideoJob.shots_json.map((shot: any, sIdx: number) => (
+                                                                <div key={sIdx} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                                                                            <span className="w-5 h-5 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] font-extrabold">
+                                                                                {shot.index || sIdx + 1}
+                                                                            </span>
+                                                                            <span>Shot {shot.index || sIdx + 1}</span>
+                                                                        </span>
+                                                                        <div className="flex items-center gap-1.5">
+                                                                            <span className="text-[10px] font-bold bg-violet-100 text-violet-800 px-2 py-0.5 rounded-md">
+                                                                                {shot.durationS || videoDurationS}s
+                                                                            </span>
+                                                                            <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60">
+                                                                                AED {+((shot.costUsd || 0.48) * 3.6725).toFixed(2)}
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="space-y-1">
+                                                                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                                            On-Screen Text Hook
+                                                                        </Label>
+                                                                        <Input
+                                                                            value={shot.onScreenText || ''}
+                                                                            onChange={(e) => handleUpdateShot(sIdx, 'onScreenText', e.target.value)}
+                                                                            className="text-xs h-8 bg-white font-semibold text-slate-800"
+                                                                            placeholder="Hook or caption displayed on screen"
+                                                                        />
+                                                                    </div>
+
+                                                                    <div className="space-y-1">
+                                                                        <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                                            Veo AI Camera & Visual Direction
+                                                                        </Label>
+                                                                        <textarea
+                                                                            value={shot.prompt || ''}
+                                                                            onChange={(e) => handleUpdateShot(sIdx, 'prompt', e.target.value)}
+                                                                            rows={2}
+                                                                            className="w-full text-xs p-2 rounded-xl border border-slate-200 bg-white font-mono leading-relaxed resize-none text-slate-700"
+                                                                            placeholder="Cinematography, subject, lighting, and action details"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                              ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : !isGeneratingVideoBrief && (
+                                                <div className="py-12 px-4 text-center space-y-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                                                    <div className="w-12 h-12 mx-auto rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center">
+                                                        <Film className="h-6 w-6" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <h4 className="text-sm font-bold text-slate-800">
+                                                            No Video Brief Generated Yet
+                                                        </h4>
+                                                        <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                                                            Configure your Google Veo engine and shot counts in Step 2, then click <strong>Generate Video Brief</strong> to start Stage 1.
+                                                        </p>
+                                                    </div>
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={handleGenerateVideoBrief}
+                                                        disabled={isGeneratingVideoBrief}
+                                                        className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-semibold gap-1.5"
+                                                    >
+                                                        <Zap className="h-3.5 w-3.5 text-amber-300" />
+                                                        <span>Start Video Brief Generation</span>
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
                                     {/* Real-time Status Card */}
                                     {isGenerating ? (
                                         <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-200 text-center space-y-3">
@@ -2114,6 +3030,8 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         </div>
                                     )}
                                 </div>
+                                )}
+                            </div>
                             )}
 
                             {/* TAB 1: COPY DECK */}
@@ -2260,29 +3178,71 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             {/* TAB: PAST GENERATION HISTORY */}
                             {activeOutputTab === 'history' && (
                                 <div className="space-y-3.5">
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
                                             <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                                                 <History className="h-4 w-4 text-violet-600" />
                                                 <span>Past Generations</span>
                                                 <span className="text-[10px] text-slate-400 font-normal">
-                                                    ({recentJobs.length} jobs in Supabase)
+                                                    ({recentJobs.length + recentVideoJobs.length} jobs in Supabase)
                                                 </span>
                                             </h4>
                                         </div>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="ghost"
-                                            onClick={fetchRecentJobs}
-                                            className="h-7 text-xs text-violet-600 hover:text-violet-700 px-2 rounded-lg"
-                                        >
-                                            <RefreshCw className="h-3 w-3 mr-1" />
-                                            <span>Refresh</span>
-                                        </Button>
+                                        <div className="flex items-center gap-2">
+                                            {/* History Filter Pills */}
+                                            <div className="flex items-center p-0.5 bg-slate-100 rounded-lg text-[10px] font-semibold border border-slate-200/70">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setHistoryFilter('all')}
+                                                    className={`px-2 py-0.5 rounded-md transition-all ${
+                                                        historyFilter === 'all'
+                                                            ? 'bg-white text-violet-900 shadow-2xs font-bold'
+                                                            : 'text-slate-500 hover:text-slate-800'
+                                                    }`}
+                                                >
+                                                    All ({recentJobs.length + recentVideoJobs.length})
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setHistoryFilter('images')}
+                                                    className={`px-2 py-0.5 rounded-md transition-all ${
+                                                        historyFilter === 'images'
+                                                            ? 'bg-white text-violet-900 shadow-2xs font-bold'
+                                                            : 'text-slate-500 hover:text-slate-800'
+                                                    }`}
+                                                >
+                                                    Images ({recentJobs.length})
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setHistoryFilter('videos')}
+                                                    className={`px-2 py-0.5 rounded-md transition-all ${
+                                                        historyFilter === 'videos'
+                                                            ? 'bg-white text-violet-900 shadow-2xs font-bold'
+                                                            : 'text-slate-500 hover:text-slate-800'
+                                                    }`}
+                                                >
+                                                    Videos ({recentVideoJobs.length})
+                                                </button>
+                                            </div>
+
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => {
+                                                    fetchRecentJobs();
+                                                    fetchRecentVideoJobs();
+                                                }}
+                                                className="h-7 text-xs text-violet-600 hover:text-violet-700 px-2 rounded-lg"
+                                            >
+                                                <RefreshCw className="h-3 w-3 mr-1" />
+                                                <span>Refresh</span>
+                                            </Button>
+                                        </div>
                                     </div>
 
-                                    {recentJobs.length === 0 ? (
+                                    {(recentJobs.length === 0 && recentVideoJobs.length === 0) ? (
                                         <div className="py-10 text-center space-y-2 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                                             <History className="h-8 w-8 mx-auto text-slate-300" />
                                             <p className="text-xs text-slate-500">No past generations saved yet.</p>
@@ -2295,8 +3255,122 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                             </Button>
                                         </div>
                                     ) : (
-                                        <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
-                                            {recentJobs.map((job) => {
+                                        <div className="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+                                            {/* Video Jobs in History */}
+                                            {(historyFilter === 'all' || historyFilter === 'videos') && recentVideoJobs.map((vJob) => {
+                                                const isCurrent = activeVideoJob?.id === vJob.id;
+                                                const estCostAed = vJob.estimated_cost_usd ? +(Number(vJob.estimated_cost_usd) * 3.6725).toFixed(2) : 0;
+                                                return (
+                                                    <div
+                                                        key={`video-${vJob.id}`}
+                                                        className={`p-3 rounded-2xl border transition-all flex flex-col gap-2.5 ${
+                                                            isCurrent
+                                                                ? 'bg-purple-50/80 border-purple-500 shadow-2xs ring-1 ring-purple-500/20'
+                                                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="w-14 h-14 rounded-xl bg-purple-950 text-white flex items-center justify-center flex-shrink-0 border border-purple-300 shadow-2xs">
+                                                                <Film className="h-6 w-6 text-purple-300" />
+                                                            </div>
+
+                                                            <div className="flex-1 min-w-0 space-y-1">
+                                                                <div className="flex items-center justify-between gap-1.5">
+                                                                    <h5 className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
+                                                                        <span className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 font-bold text-[9px] uppercase">
+                                                                            Video Reel
+                                                                        </span>
+                                                                        <span className="truncate">{vJob.topic || 'Veo Video Reel'}</span>
+                                                                    </h5>
+                                                                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                                                                        vJob.status === 'completed' || vJob.output_video_url || vJob.final_video_url
+                                                                            ? 'bg-emerald-100 text-emerald-800'
+                                                                            : vJob.status === 'rendering'
+                                                                            ? 'bg-cyan-100 text-cyan-800 animate-pulse'
+                                                                            : vJob.status === 'draft_ready'
+                                                                            ? 'bg-violet-100 text-violet-800'
+                                                                            : 'bg-slate-100 text-slate-700'
+                                                                    }`}>
+                                                                        {vJob.status === 'draft_ready' ? 'Brief Ready' : vJob.status}
+                                                                    </span>
+                                                                </div>
+
+                                                                <p className="text-[11px] text-slate-500 line-clamp-1 italic">
+                                                                    "{vJob.voiceover_script || vJob.topic || 'Video Reel Storyboard'}"
+                                                                </p>
+
+                                                                <div className="flex flex-wrap items-center gap-1.5 text-[10px] pt-0.5">
+                                                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-mono">
+                                                                        {vJob.engine || 'veo-3.1-fast'}
+                                                                    </span>
+                                                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-mono">
+                                                                        {vJob.aspect_ratio || '9:16'}
+                                                                    </span>
+                                                                    <span className="px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-mono">
+                                                                        {vJob.shots_json?.length || 3} shots
+                                                                    </span>
+                                                                    {vJob.actual_cost_usd !== undefined && vJob.actual_cost_usd !== null ? (
+                                                                        <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 font-mono font-bold border border-emerald-200/60 flex items-center gap-0.5">
+                                                                            <Receipt className="h-2.5 w-2.5 text-emerald-600" />
+                                                                            <span>AED {(Number(vJob.actual_cost_usd) * 3.6725).toFixed(2)}</span>
+                                                                        </span>
+                                                                    ) : estCostAed > 0 ? (
+                                                                        <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 font-mono font-bold border border-emerald-200/60 flex items-center gap-0.5">
+                                                                            <Receipt className="h-2.5 w-2.5 text-emerald-600" />
+                                                                            <span>AED {estCostAed.toFixed(2)}</span>
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px] text-slate-400">
+                                                            <span>
+                                                                {vJob.created_at ? new Date(vJob.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                                                            </span>
+
+                                                            <div className="flex items-center gap-1.5">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleRefreshVideoStatus(vJob.id);
+                                                                    }}
+                                                                    disabled={isRefreshingVideoStatus}
+                                                                    className="h-6 text-[10px] px-2 rounded-lg border-slate-200 text-slate-600 hover:text-purple-700 hover:border-purple-300 gap-1"
+                                                                    title="Query Railway video engine for live status"
+                                                                >
+                                                                    <RefreshCw className={`h-2.5 w-2.5 ${isRefreshingVideoStatus && activeVideoJob?.id === vJob.id ? 'animate-spin text-purple-600' : ''}`} />
+                                                                    <span>Sync</span>
+                                                                </Button>
+
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    onClick={() => {
+                                                                        setActiveVideoJob(vJob);
+                                                                        setFormat('video');
+                                                                        setActiveOutputTab('visual_assets');
+                                                                        handleRefreshVideoStatus(vJob.id);
+                                                                    }}
+                                                                    className={`h-6 text-[10px] px-2.5 rounded-lg font-semibold ${
+                                                                        isCurrent 
+                                                                            ? 'bg-purple-600 text-white' 
+                                                                            : 'bg-slate-900 text-white hover:bg-slate-800'
+                                                                    }`}
+                                                                >
+                                                                    {isCurrent ? 'Viewing' : (vJob.output_video_url || vJob.final_video_url ? 'Play Reel' : 'Open Video Reel')}
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {/* Studio Image Jobs in History */}
+                                            {(historyFilter === 'all' || historyFilter === 'images') && recentJobs.map((job) => {
                                                 const isCurrent = activeJob?.id === job.id;
                                                 const firstImg = job.image_urls && job.image_urls[0];
                                                 const jobCost = calculateJobCost(
@@ -2701,44 +3775,89 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                 </DialogContent>
             </Dialog>
 
-            {/* WEBHOOK URL CONFIGURATION MODAL */}
+            {/* WEBHOOK URL CONFIGURATION MODAL (IMAGES & 2 VIDEO WORKFLOWS) */}
             <Dialog open={isWebhookModalOpen} onOpenChange={setIsWebhookModalOpen}>
-                <DialogContent className="sm:max-w-md rounded-3xl bg-white p-6">
+                <DialogContent className="sm:max-w-lg rounded-3xl bg-white p-6 max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
                             <Settings className="h-5 w-5 text-violet-600" />
-                            n8n Webhook Configuration
+                            n8n Webhook Pipeline Configuration
                         </DialogTitle>
                         <DialogDescription className="text-xs text-slate-500">
-                            Configure the webhook endpoint for your n8n workflow (<code className="font-mono text-[11px]">Webhook sp-studio-generate</code>).
+                            Configure endpoints for Image generation and the 2 Veo Video workflows (<code className="font-mono text-[11px]">spectra-video-brief</code> & <code className="font-mono text-[11px]">spectra-video-render</code>).
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-3 py-3">
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-bold text-slate-700">n8n Webhook Destination URL</Label>
+                    <div className="space-y-4 py-3">
+                        {/* 1. Image Generation Webhook */}
+                        <div className="space-y-1.5 p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                            <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                <ImageIcon className="h-3.5 w-3.5 text-violet-600" />
+                                <span>Image Generation Webhook (sp-studio-generate)</span>
+                            </Label>
                             <Input
                                 value={tempWebhookUrl}
-                                onChange={(e) => setTempWebhookUrl(e.target.value)}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setTempWebhookUrl(val);
+                                    if (val && !tempVideoBriefWebhookUrl) {
+                                        setTempVideoBriefWebhookUrl(val.replace(/spectra-studio-generate/g, 'spectra-video-brief'));
+                                    }
+                                    if (val && !tempVideoRenderWebhookUrl) {
+                                        setTempVideoRenderWebhookUrl(val.replace(/spectra-studio-generate/g, 'spectra-video-render'));
+                                    }
+                                }}
                                 placeholder="https://your-n8n.cloud/webhook/spectra-studio-generate"
-                                className="text-xs h-10 rounded-xl font-mono"
+                                className="text-xs h-9 rounded-xl font-mono bg-white"
                             />
-                            <p className="text-[11px] text-slate-500">
-                                When you click "Generate", a job row is created in <code className="font-mono">spectra_studio_jobs</code> and its <code className="font-mono">jobId</code> is sent directly to this n8n webhook.
-                            </p>
+                            <span className="text-[10px] text-slate-500 block">
+                                Triggers single image and multi-slide carousel generation on <code className="font-mono">spectra_studio_jobs</code>.
+                            </span>
                         </div>
 
+                        {/* 2. Video Workflow 1: Brief Webhook */}
+                        <div className="space-y-1.5 p-3 rounded-2xl bg-purple-50/60 border border-purple-200">
+                            <Label className="text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                                <Zap className="h-3.5 w-3.5 text-purple-600" />
+                                <span>Video Workflow 1: Brief & Voiceover (sp-video-brief)</span>
+                            </Label>
+                            <Input
+                                value={tempVideoBriefWebhookUrl}
+                                onChange={(e) => setTempVideoBriefWebhookUrl(e.target.value)}
+                                placeholder="https://your-n8n.cloud/webhook/spectra-video-brief"
+                                className="text-xs h-9 rounded-xl font-mono bg-white"
+                            />
+                            <span className="text-[10px] text-purple-800 block">
+                                Calls GPT-4o for shot-by-shot brief, generates OpenAI TTS-1 audio, uploads to Supabase, and saves <code className="font-mono">draft_ready</code> row in <code className="font-mono">video_jobs</code>.
+                            </span>
+                        </div>
+
+                        {/* 3. Video Workflow 2: Render Webhook */}
+                        <div className="space-y-1.5 p-3 rounded-2xl bg-cyan-50/60 border border-cyan-200">
+                            <Label className="text-xs font-bold text-cyan-950 flex items-center gap-1.5">
+                                <Film className="h-3.5 w-3.5 text-cyan-600" />
+                                <span>Video Workflow 2: Veo Render Engine (sp-video-render)</span>
+                            </Label>
+                            <Input
+                                value={tempVideoRenderWebhookUrl}
+                                onChange={(e) => setTempVideoRenderWebhookUrl(e.target.value)}
+                                placeholder="https://your-n8n.cloud/webhook/spectra-video-render"
+                                className="text-xs h-9 rounded-xl font-mono bg-white"
+                            />
+                            <span className="text-[10px] text-cyan-800 block">
+                                Receives <code className="font-mono">jobId</code>, queries Supabase, dispatches to Railway Veo engine, and stitches final MP4 reel with audio.
+                            </span>
+                        </div>
+
+                        {/* Pipeline architecture recap */}
                         <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-1 text-slate-600">
-                            <div className="font-semibold text-slate-900">How n8n Executes:</div>
-                            <div>1. Webhook receives <code className="font-mono">jobId</code></div>
-                            <div>2. Fetches job row from Supabase</div>
-                            <div>3. Enhances prompt using OpenAI GPT-4.1-mini</div>
-                            <div>4. Renders image via OpenAI or Gemini</div>
-                            <div>5. Uploads to Supabase storage & marks <code className="font-mono text-emerald-700">done</code></div>
+                            <div className="font-semibold text-slate-900">2-Stage Video Pipeline:</div>
+                            <div>1. <strong>Stage 1 (Brief)</strong>: Prompt & specs → n8n creates shot cards & OpenAI voiceover MP3</div>
+                            <div>2. <strong>Stage 2 (Render)</strong>: Review shots → n8n calls Railway engine to render Veo clips</div>
                         </div>
                     </div>
 
-                    <DialogFooter className="gap-2 sm:gap-0">
+                    <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-slate-100">
                         <Button
                             variant="ghost"
                             onClick={() => setIsWebhookModalOpen(false)}
@@ -2750,7 +3869,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             onClick={saveWebhookSettings}
                             className="bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl text-xs"
                         >
-                            Save Webhook URL
+                            Save Webhook Pipeline URLs
                         </Button>
                     </DialogFooter>
                 </DialogContent>

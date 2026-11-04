@@ -256,6 +256,70 @@ export const STUDIO_AI_MODELS: StudioModelOption[] = [
     }
 ];
 
+export interface VideoModelOption {
+    id: 'veo-3.1-fast' | 'veo-3.1-lite' | 'veo-3.1-standard';
+    name: string;
+    provider: string;
+    desc: string;
+    badge?: string;
+    ratesUsd: {
+        '720p': number;
+        '1080p': number;
+        '4k': number;
+    };
+}
+
+export const VIDEO_AI_MODELS: VideoModelOption[] = [
+    {
+        id: 'veo-3.1-fast',
+        name: 'Google · Veo 3.1 Fast',
+        provider: 'google',
+        desc: 'Balanced high-velocity rendering with rich cinematic camera control.',
+        badge: 'Recommended',
+        ratesUsd: { '720p': 0.10, '1080p': 0.12, '4k': 0.30 }
+    },
+    {
+        id: 'veo-3.1-lite',
+        name: 'Google · Veo 3.1 Lite',
+        provider: 'google',
+        desc: 'Cost-optimized for social reels, quick story variations & rapid storyboards.',
+        badge: 'Lowest Cost',
+        ratesUsd: { '720p': 0.06, '1080p': 0.08, '4k': 0.20 }
+    },
+    {
+        id: 'veo-3.1-standard',
+        name: 'Google · Veo 3.1 Standard',
+        provider: 'google',
+        desc: 'Maximum cinematic fidelity, fluid real-world physics and fine depth of field.',
+        badge: 'Highest Quality',
+        ratesUsd: { '720p': 0.40, '1080p': 0.40, '4k': 0.60 }
+    }
+];
+
+export function calculateVideoJobCost(
+    engine: 'veo-3.1-fast' | 'veo-3.1-lite' | 'veo-3.1-standard' = 'veo-3.1-fast',
+    resolution: '720p' | '1080p' | '4k' = '1080p',
+    shotCount: number = 3,
+    durationS: number = 4
+) {
+    const model = VIDEO_AI_MODELS.find(m => m.id === engine) || VIDEO_AI_MODELS[0];
+    const rateUsd = model.ratesUsd[resolution] ?? 0.12;
+    const totalDurationS = Math.max(shotCount, 1) * Math.max(durationS, 1);
+    const totalUsd = +(totalDurationS * rateUsd).toFixed(2);
+    const totalAed = +(totalUsd * 3.6725).toFixed(2);
+    const rateAed = +(rateUsd * 3.6725).toFixed(2);
+    return {
+        rateUsd,
+        rateAed,
+        totalDurationS,
+        totalUsd,
+        totalAed,
+        formattedRate: `$${rateUsd.toFixed(2)} (AED ${rateAed.toFixed(2)})/s`,
+        formattedTotal: `$${totalUsd.toFixed(2)} (AED ${totalAed.toFixed(2)})`,
+        modelName: model.name
+    };
+}
+
 export function getModelCost(modelId?: string) {
     const found = STUDIO_AI_MODELS.find(m => m.id === modelId) || STUDIO_AI_MODELS[1]; // default gpt-image-1
     return {
