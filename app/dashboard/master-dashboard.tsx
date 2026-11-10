@@ -18,7 +18,10 @@ import {
     ChevronRight,
     DollarSign,
     Wrench,
-    FileText
+    FileText,
+    ShieldCheck,
+    Clock,
+    CheckCircle2
 } from "lucide-react";
 import {
     Tooltip as UITooltip,
@@ -57,6 +60,11 @@ export default function MasterDashboard() {
     const [isRepliesModalOpen, setIsRepliesModalOpen] = useState(false);
     const [isRepliesExpanded, setIsRepliesExpanded] = useState(false);
     const [chatLead, setChatLead] = useState<any | null>(null);
+    const [approvalsData, setApprovalsData] = useState<{
+        approvalsSummary: any;
+        notificationsSummary: any;
+        recentPending: any[];
+    } | null>(null);
     const [dateRange, setDateRange] = useState<any>({
         from: subDays(new Date(), 7),
         to: new Date()
@@ -64,13 +72,26 @@ export default function MasterDashboard() {
 
     const loading = loadingMasterMetrics || loadingLeads;
 
-    // Trigger dynamic metrics and leads re-fetch on mount and when dateRange changes
+    // Trigger dynamic metrics, leads, and approvals telemetry re-fetch on mount and when dateRange changes
     useEffect(() => {
         if (dateRange?.from) {
             const from = startOfDay(new Date(dateRange.from));
             const to = dateRange.to ? endOfDay(new Date(dateRange.to)) : endOfDay(from);
             refreshMasterMetrics({ from, to, force: true });
             refreshLeads({ from, to, force: true });
+
+            fetch(`/api/approvals?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}&limit=100`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        setApprovalsData({
+                            approvalsSummary: data.approvalsSummary,
+                            notificationsSummary: data.notificationsSummary,
+                            recentPending: (data.approvals || []).filter((a: any) => a.status === 'SPECTRA_REVIEW_REQUIRED').slice(0, 3)
+                        });
+                    }
+                })
+                .catch(() => {});
         }
     }, [dateRange, refreshMasterMetrics, refreshLeads]);
 
@@ -409,6 +430,90 @@ export default function MasterDashboard() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* Internal Team Commercial Approvals & Governance Summary */}
+            <Card className="bg-white/95 backdrop-blur-xl border border-slate-200/80 shadow-md rounded-2xl overflow-hidden">
+                <CardHeader className="pb-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <span className="p-1.5 rounded-lg bg-violet-50 text-violet-600 border border-violet-100">
+                                <ShieldCheck className="h-4 w-4" />
+                            </span>
+                            Internal Team Approvals &amp; Governance Audit
+                        </CardTitle>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            Live commercial quotes awaiting review (<code className="font-mono text-violet-700">commercial_approvals</code>) and governance emails to{" "}
+                            <span className="font-semibold text-slate-700">marketing@spectradubai.com</span> (<code className="font-mono text-indigo-700">internal_notifications</code>).
+                        </p>
+                    </div>
+                    <Button
+                        size="sm"
+                        onClick={() => router.push("/dashboard/approvals")}
+                        className="bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl gap-1.5 shadow-sm shrink-0"
+                    >
+                        <span>Open Approval Queue</span>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                </CardHeader>
+                <CardContent className="p-5 space-y-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Pending Review</span>
+                            <span className="text-xl font-extrabold text-slate-900 mt-1 block">
+                                {approvalsData?.approvalsSummary?.reviewRequired ?? "—"}
+                            </span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 block">Awaiting Customer</span>
+                            <span className="text-xl font-extrabold text-slate-900 mt-1 block">
+                                {approvalsData?.approvalsSummary?.awaitingCustomer ?? "—"}
+                            </span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">eWorks Jobs Booked</span>
+                            <span className="text-xl font-extrabold text-slate-900 mt-1 block">
+                                {approvalsData?.approvalsSummary?.jobCreated ?? "—"}
+                            </span>
+                        </div>
+                        <div className="p-3 rounded-xl bg-violet-50/70 border border-violet-200">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 block">Audit Emails Sent</span>
+                            <span className="text-xl font-extrabold text-slate-900 mt-1 block">
+                                {approvalsData?.notificationsSummary?.verifiedSent ?? "—"}
+                            </span>
+                        </div>
+                    </div>
+
+                    {approvalsData?.recentPending && approvalsData.recentPending.length > 0 && (
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                                Needs Immediate Team Action (Gmail or Frontend)
+                            </span>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {approvalsData.recentPending.map((item: any) => (
+                                    <div
+                                        key={item.id}
+                                        onClick={() => router.push("/dashboard/approvals")}
+                                        className="p-3 rounded-xl bg-amber-50/40 border border-amber-200/80 hover:border-violet-400 transition-all cursor-pointer flex flex-col justify-between gap-2"
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-mono text-[10px] font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                {item.approval_id}
+                                            </span>
+                                            <Clock className="h-3.5 w-3.5 text-amber-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-bold text-slate-900 truncate">{item.resolved_service_name}</p>
+                                            <p className="text-[11px] text-slate-500 truncate">
+                                                {item.customer?.full_name || item.customer?.customer_name || "Customer"}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

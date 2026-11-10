@@ -14,7 +14,8 @@ import {
     Mic,
     ChevronDown,
     MessageCircle,
-    Smartphone
+    Smartphone,
+    ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,6 +107,11 @@ export default function WhatsappLayout({
                             <DropdownMenuItem asChild>
                                 <Link href="/dashboard" className="cursor-pointer w-full flex items-center">
                                     <LayoutDashboard className="mr-2 h-4 w-4 text-violet-600" /> Master Overview
+                                </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                                <Link href="/dashboard/approvals" className="cursor-pointer w-full flex items-center">
+                                    <ShieldCheck className="mr-2 h-4 w-4 text-violet-600" /> Team Approvals
                                 </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>

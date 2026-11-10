@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Mail, MessageCircle, Mic, LogOut, ChevronDown, Wallet, BarChart2, Users, Send, Key, ExternalLink, Smartphone, Activity, Briefcase, Sparkles, Megaphone } from "lucide-react";
+import { LayoutDashboard, Mail, MessageCircle, Mic, LogOut, ChevronDown, Wallet, BarChart2, Users, Send, Key, ExternalLink, Smartphone, Activity, Briefcase, Sparkles, Megaphone, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import {
@@ -40,6 +40,11 @@ const sidebarItems = [
         icon: Briefcase,
     },
     {
+        title: "Team Approvals",
+        href: "/dashboard/approvals",
+        icon: ShieldCheck,
+    },
+    {
         title: "Email Marketing",
         href: "/dashboard/email",
         icon: Mail,
@@ -72,6 +77,30 @@ function DashboardContent({
 }) {
     const pathname = usePathname();
     const router = useRouter();
+    const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchCount = () => {
+            const fromDate = new Date();
+            fromDate.setDate(fromDate.getDate() - 7);
+            fromDate.setHours(0, 0, 0, 0);
+            fetch(`/api/approvals?from=${encodeURIComponent(fromDate.toISOString())}&limit=200`)
+                .then(r => r.json())
+                .then(d => {
+                    if (mounted && d.success && d.approvalsSummary) {
+                        setPendingApprovalsCount(d.approvalsSummary.reviewRequired || 0);
+                    }
+                })
+                .catch(() => {});
+        };
+        fetchCount();
+        const iv = setInterval(fetchCount, 30000);
+        return () => {
+            mounted = false;
+            clearInterval(iv);
+        };
+    }, [pathname]);
 
     const dashboardConfig = {
         master: {
@@ -82,6 +111,7 @@ function DashboardContent({
                 { title: "AI Content Studio", href: "/dashboard/ai-content", icon: Sparkles },
                 { title: "Ads Manager", href: "/dashboard/ads-manager", icon: Megaphone },
                 { title: "eWorks Operations", href: "/dashboard/eworks", icon: Briefcase },
+                { title: "Team Approvals", href: "/dashboard/approvals", icon: ShieldCheck },
                 { title: "Email Marketing", href: "/dashboard/email", icon: Mail },
                 { title: "WhatsApp CRM", href: "/dashboard/whatsapp", icon: MessageCircle },
                 { title: "Credentials", href: "/dashboard/credentials", icon: Key },
@@ -168,6 +198,9 @@ function DashboardContent({
                                 <DropdownMenuItem onClick={() => router.push("/dashboard/eworks")}>
                                     <Briefcase className="mr-2 h-4 w-4 text-violet-600" /> eWorks Operations
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => router.push("/dashboard/approvals")}>
+                                    <ShieldCheck className="mr-2 h-4 w-4 text-violet-600" /> Team Approvals
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => router.push("/dashboard/email")}>
                                     <Mail className="mr-2 h-4 w-4 text-violet-600" /> Email Marketing
                                 </DropdownMenuItem>
@@ -189,13 +222,24 @@ function DashboardContent({
                                 <Link
                                     key={index}
                                     href={item.href}
-                                    className={`group flex items-center gap-4 rounded-full px-4 py-3 text-sm font-medium transition-all duration-300 ${isActive
+                                    className={`group flex items-center justify-between rounded-full px-4 py-3 text-sm font-medium transition-all duration-300 ${isActive
                                         ? "active-liquid-pill"
                                         : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                                         }`}
                                 >
-                                    <item.icon className={`h-5 w-5 ${isActive ? "text-white" : "text-slate-500 group-hover:text-slate-800 transition-colors"}`} />
-                                    {item.title}
+                                    <span className="flex items-center gap-4 min-w-0">
+                                        <item.icon className={`h-5 w-5 shrink-0 ${isActive ? "text-white" : "text-slate-500 group-hover:text-slate-800 transition-colors"}`} />
+                                        <span className="truncate">{item.title}</span>
+                                    </span>
+                                    {item.href === "/dashboard/approvals" && pendingApprovalsCount > 0 && (
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
+                                            isActive
+                                                ? "bg-white text-violet-700"
+                                                : "bg-amber-500 text-white shadow-xs"
+                                        }`}>
+                                            {pendingApprovalsCount}
+                                        </span>
+                                    )}
                                 </Link>
                             );
                         })}

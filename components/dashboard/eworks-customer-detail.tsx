@@ -38,6 +38,7 @@ import {
     Layers3
 } from "lucide-react";
 import { format } from "date-fns";
+import { ApprovalsGovernancePanel } from "@/components/dashboard/approvals-governance-panel";
 
 interface EworksCustomerDetailProps {
     customer: EworksCustomer | null;
@@ -215,6 +216,9 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                         </TabsTrigger>
                         <TabsTrigger value="service_case" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
                             <Wrench className="h-3.5 w-3.5 mr-1" /> Service Case
+                        </TabsTrigger>
+                        <TabsTrigger value="approvals" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
+                            <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Approvals &amp; Audit
                         </TabsTrigger>
                         <TabsTrigger value="retention" className="text-xs font-semibold data-[state=active]:bg-violet-600 data-[state=active]:text-white data-[state=active]:shadow-sm rounded-lg px-3 py-1.5">
                             <Bot className="h-3.5 w-3.5 mr-1" /> Outreach
@@ -394,11 +398,37 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
 
                     {/* Quotes Tab */}
                     <TabsContent value="quotes" className="space-y-4">
+                        {/* Quote Summary Strip from eWorks Sync */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                                <span className="text-slate-500 font-medium block">Total Synced Quotes</span>
+                                <span className="text-lg font-extrabold text-slate-900">{customer.total_quote_count || 0}</span>
+                            </div>
+                            <div className="bg-indigo-50/70 border border-indigo-200 p-3 rounded-xl">
+                                <span className="text-indigo-700 font-medium block">Pending Quotes</span>
+                                <span className="text-lg font-extrabold text-indigo-900">{customer.pending_quote_count || 0}</span>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                                <span className="text-slate-500 font-medium block">Latest Converted</span>
+                                <span className="text-sm font-bold text-slate-900 mt-1 block">
+                                    {customer.latest_converted_quote_id ? `Quote #${customer.latest_converted_quote_id}` : "None"}
+                                </span>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                                <span className="text-slate-500 font-medium block">eWorks Quotes Synced</span>
+                                <span className="text-xs font-bold text-slate-700 mt-1 block">
+                                    {formatDate(customer.eworks_quotes_synced_at)}
+                                </span>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <Card className="bg-white border-slate-200 text-slate-900 shadow-sm rounded-xl">
                                 <CardHeader className="pb-2">
                                     <CardTitle className="text-sm font-bold text-violet-700 flex items-center justify-between">
-                                        <span>Latest Quote ({customer.latest_quote_ref || "N/A"})</span>
+                                        <span>
+                                            Latest Quote ({customer.latest_quote_ref || (customer.latest_quote_id ? `#${customer.latest_quote_id}` : "N/A")})
+                                        </span>
                                         {customer.latest_quote_link && (
                                             <a
                                                 href={customer.latest_quote_link}
@@ -414,11 +444,17 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                 <CardContent className="space-y-3 text-sm">
                                     <div className="flex justify-between border-b border-slate-100 pb-2">
                                         <span className="text-slate-500 font-medium">Quote Reference</span>
-                                        <span className="font-bold text-slate-900">{customer.latest_quote_ref || "N/A"}</span>
+                                        <span className="font-bold text-slate-900">
+                                            {customer.latest_quote_ref || (customer.latest_quote_id ? `ID #${customer.latest_quote_id}` : "N/A")}
+                                        </span>
                                     </div>
                                     <div className="flex justify-between border-b border-slate-100 pb-2">
                                         <span className="text-slate-500 font-medium">Total Amount</span>
-                                        <span className="font-extrabold text-emerald-600">{formatCurrency(customer.latest_quote_total)}</span>
+                                        <span className={`font-extrabold ${customer.latest_quote_total !== null && customer.latest_quote_total !== undefined ? "text-emerald-600" : "text-slate-500 text-xs"}`}>
+                                            {customer.latest_quote_total !== null && customer.latest_quote_total !== undefined
+                                                ? formatCurrency(customer.latest_quote_total)
+                                                : "Not Priced (Draft)"}
+                                        </span>
                                     </div>
                                     <div className="flex justify-between border-b border-slate-100 pb-2">
                                         <span className="text-slate-500 font-medium">Status</span>
@@ -430,6 +466,14 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                         <span className="text-slate-500 font-medium">Quoted Category</span>
                                         <span className="text-slate-800 font-medium">{customer.latest_quoted_service_category || "General Service"}</span>
                                     </div>
+                                    {customer.latest_quote_description && (
+                                        <div className="border-b border-slate-100 pb-2">
+                                            <span className="text-slate-500 font-medium text-xs block mb-0.5">Description</span>
+                                            <p className="text-xs text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                {customer.latest_quote_description}
+                                            </p>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between text-xs text-slate-500 font-medium">
                                         <span>Date: {formatDate(customer.latest_quote_date)}</span>
                                         <span>Expires: {formatDate(customer.latest_quote_expiry_date)}</span>
@@ -439,19 +483,25 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
 
                             <Card className="bg-white border-slate-200 text-slate-900 shadow-sm rounded-xl">
                                 <CardHeader className="pb-2">
-                                    <CardTitle className="text-sm font-bold text-indigo-700">Pending & AMC Quotes</CardTitle>
+                                    <CardTitle className="text-sm font-bold text-indigo-700">Pending &amp; AMC Quotes</CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-3 text-sm">
                                     {customer.has_pending_quote ? (
                                         <div className="bg-indigo-50/70 border border-indigo-200 p-3.5 rounded-xl space-y-2">
-                                            <div className="flex justify-between items-center">
-                                                <span className="font-bold text-indigo-900">Pending Quote Available</span>
+                                            <div className="flex justify-between items-center gap-2">
+                                                <span className="font-bold text-indigo-900">
+                                                    {customer.latest_pending_quote_id
+                                                        ? `Latest Pending (#${customer.latest_pending_quote_id})`
+                                                        : "Pending Quote Available"}
+                                                </span>
                                                 <Badge className="bg-indigo-100 text-indigo-800 border-indigo-300 font-bold">
-                                                    {formatCurrency(customer.latest_pending_quote_total)}
+                                                    {customer.latest_pending_quote_total !== null && customer.latest_pending_quote_total !== undefined
+                                                        ? formatCurrency(customer.latest_pending_quote_total)
+                                                        : "Draft / Unpriced"}
                                                 </Badge>
                                             </div>
                                             <p className="text-xs text-slate-600 font-medium">
-                                                Expiry Date: {formatDate(customer.latest_pending_quote_expiry_date)}
+                                                Total Pending in eWorks: {customer.pending_quote_count || 1} · Expiry: {formatDate(customer.latest_pending_quote_expiry_date)}
                                             </p>
                                             {customer.latest_pending_quote_link && (
                                                 <a
@@ -477,6 +527,10 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                 </CardContent>
                             </Card>
                         </div>
+
+                        <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5">
+                            Note: eWorks syncs aggregate quote counts ({customer.total_quote_count || 0} total, {customer.pending_quote_count || 0} pending) and the latest quote snapshots onto the customer record. For Spectra AI commercial quotes &amp; team approvals, view the <strong>Approvals &amp; Audit</strong> tab.
+                        </p>
                     </TabsContent>
 
                     {/* Invoices & Financials Tab */}
@@ -923,6 +977,11 @@ export function EworksCustomerDetail({ customer, open, onOpenChange }: EworksCus
                                 </CardContent>
                             </Card>
                         )}
+                    </TabsContent>
+
+                    {/* Commercial Approvals & Internal Governance Audit Tab */}
+                    <TabsContent value="approvals" className="space-y-4">
+                        <ApprovalsGovernancePanel customerId={customer.id} compact />
                     </TabsContent>
                 </Tabs>
             </DialogContent>
