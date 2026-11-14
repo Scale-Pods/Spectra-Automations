@@ -223,23 +223,52 @@ export default function AIContentStudioPage() {
     }, [activeJob, selectedModel, variantCount, activeModelObj, format, carouselSlides]);
 
     // Computed Video Job Exact Cost (Veo rates per second in USD & AED)
-    const activeVideoCost = useMemo(() => {
-        if (activeVideoJob && activeVideoJob.estimated_cost_usd) {
-            const usd = Number(activeVideoJob.estimated_cost_usd);
-            const aed = +(usd * 3.6725).toFixed(2);
-            return {
-                rateUsd: 0.12,
-                rateAed: 0.44,
-                totalDurationS: (activeVideoJob.shots_json?.length || videoShotCount) * videoDurationS,
-                totalUsd: usd,
-                totalAed: aed,
-                formattedRate: `$0.12 (AED 0.44)/s`,
-                formattedTotal: `$${usd.toFixed(2)} (AED ${aed.toFixed(2)})`,
-                modelName: activeVideoJob.engine || videoEngine
-            };
-        }
+    // 1. Editor configuration cost (reactive to current model, resolution, shot count, clip duration)
+    const editorVideoCost = useMemo(() => {
         return calculateVideoJobCost(videoEngine, videoResolution, videoShotCount, videoDurationS);
-    }, [activeVideoJob, videoEngine, videoResolution, videoShotCount, videoDurationS]);
+    }, [videoEngine, videoResolution, videoShotCount, videoDurationS]);
+
+    // 2. Active loaded job cost (for the right column output card)
+    const activeJobVideoCost = useMemo(() => {
+        if (activeVideoJob) {
+            if (activeVideoJob.actual_cost_usd !== null && activeVideoJob.actual_cost_usd !== undefined) {
+                const usd = Number(activeVideoJob.actual_cost_usd);
+                const aed = +(usd * 3.6725).toFixed(2);
+                return {
+                    rateUsd: 0,
+                    rateAed: 0,
+                    totalDurationS: 0,
+                    totalUsd: usd,
+                    totalAed: aed,
+                    formattedRate: '',
+                    formattedTotal: `$${usd.toFixed(2)} (AED ${aed.toFixed(2)})`,
+                    modelName: activeVideoJob.engine || 'Veo AI'
+                };
+            }
+            if (activeVideoJob.estimated_cost_usd) {
+                const usd = Number(activeVideoJob.estimated_cost_usd);
+                const aed = +(usd * 3.6725).toFixed(2);
+                const jobEngine = activeVideoJob.engine || videoEngine;
+                const jobRes = (['720p', '1080p', '4k'].includes(activeVideoJob.resolution) ? activeVideoJob.resolution : videoResolution) as '720p' | '1080p' | '4k';
+                const m = VIDEO_AI_MODELS.find(x => x.id === jobEngine) || VIDEO_AI_MODELS[0];
+                const rUsd = m.ratesUsd[jobRes] ?? 0.12;
+                const rAed = +(rUsd * 3.6725).toFixed(2);
+                return {
+                    rateUsd: rUsd,
+                    rateAed: rAed,
+                    totalDurationS: (activeVideoJob.shots_json?.length || videoShotCount) * videoDurationS,
+                    totalUsd: usd,
+                    totalAed: aed,
+                    formattedRate: `$${rUsd.toFixed(2)} (AED ${rAed.toFixed(2)})/s`,
+                    formattedTotal: `$${usd.toFixed(2)} (AED ${aed.toFixed(2)})`,
+                    modelName: m.name
+                };
+            }
+        }
+        return editorVideoCost;
+    }, [activeVideoJob, editorVideoCost, videoEngine, videoResolution, videoShotCount, videoDurationS]);
+
+    const activeVideoCost = activeJobVideoCost;
 
     // Ensure variant count stays within selected model capability
     useEffect(() => {
@@ -247,6 +276,20 @@ export default function AIContentStudioPage() {
             setVariantCount(1);
         }
     }, [activeModelObj, variantCount]);
+
+    const deriveVideoWebhookUrl = (
+        baseUrl: string,
+        targetSlug: 'spectra-video-brief' | 'spectra-video-render'
+    ) => {
+        const trimmed = baseUrl.trim();
+        if (!trimmed || (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))) {
+            return '';
+        }
+        if (/spectra-studio-generate|sp-studio-generate/.test(trimmed)) {
+            return trimmed.replace(/spectra-studio-generate|sp-studio-generate/g, targetSlug);
+        }
+        return trimmed.replace(/(\/webhook(?:-test)?\/)([^/?#]+)(\/?.*)$/, `$1${targetSlug}$3`);
+    };
 
     // Load saved webhook URLs & recent jobs on mount
     useEffect(() => {
@@ -262,7 +305,7 @@ export default function AIContentStudioPage() {
             setVideoBriefWebhookUrl(savedBrief);
             setTempVideoBriefWebhookUrl(savedBrief);
         } else if (savedUrl) {
-            const derived = savedUrl.replace(/spectra-studio-generate/g, 'spectra-video-brief');
+            const derived = deriveVideoWebhookUrl(savedUrl, 'spectra-video-brief');
             setVideoBriefWebhookUrl(derived);
             setTempVideoBriefWebhookUrl(derived);
         }
@@ -270,7 +313,7 @@ export default function AIContentStudioPage() {
             setVideoRenderWebhookUrl(savedRender);
             setTempVideoRenderWebhookUrl(savedRender);
         } else if (savedUrl) {
-            const derived = savedUrl.replace(/spectra-studio-generate/g, 'spectra-video-render');
+            const derived = deriveVideoWebhookUrl(savedUrl, 'spectra-video-render');
             setVideoRenderWebhookUrl(derived);
             setTempVideoRenderWebhookUrl(derived);
         }
@@ -374,6 +417,10 @@ export default function AIContentStudioPage() {
                         fetchRecentVideoJobs();
                     } else if (current.status === 'failed') {
                         setIsRenderingVideo(false);
+                        setWebhookResult({
+                            success: false,
+                            error: `Render failed: ${current.error_detail || 'Railway video engine reported a failure.'}`
+                        });
                         if (videoPollingIntervalRef.current) clearInterval(videoPollingIntervalRef.current);
                         fetchRecentVideoJobs();
                     }
@@ -525,16 +572,20 @@ export default function AIContentStudioPage() {
 
     // Save Webhook URLs
     const saveWebhookSettings = () => {
-        setWebhookUrl(tempWebhookUrl);
-        localStorage.setItem("SPECTRA_STUDIO_WEBHOOK_URL", tempWebhookUrl);
+        const cleanBase = tempWebhookUrl.trim();
+        setWebhookUrl(cleanBase);
+        setTempWebhookUrl(cleanBase);
+        localStorage.setItem("SPECTRA_STUDIO_WEBHOOK_URL", cleanBase);
 
-        const briefUrlToSave = tempVideoBriefWebhookUrl.trim() || tempWebhookUrl.replace(/spectra-studio-generate/g, 'spectra-video-brief');
-        const renderUrlToSave = tempVideoRenderWebhookUrl.trim() || tempWebhookUrl.replace(/spectra-studio-generate/g, 'spectra-video-render');
+        const briefUrlToSave = tempVideoBriefWebhookUrl.trim() || deriveVideoWebhookUrl(cleanBase, 'spectra-video-brief');
+        const renderUrlToSave = tempVideoRenderWebhookUrl.trim() || deriveVideoWebhookUrl(cleanBase, 'spectra-video-render');
 
         setVideoBriefWebhookUrl(briefUrlToSave);
+        setTempVideoBriefWebhookUrl(briefUrlToSave);
         localStorage.setItem("SPECTRA_VIDEO_BRIEF_WEBHOOK_URL", briefUrlToSave);
 
         setVideoRenderWebhookUrl(renderUrlToSave);
+        setTempVideoRenderWebhookUrl(renderUrlToSave);
         localStorage.setItem("SPECTRA_VIDEO_RENDER_WEBHOOK_URL", renderUrlToSave);
 
         setIsWebhookModalOpen(false);
@@ -571,6 +622,7 @@ export default function AIContentStudioPage() {
                     styleDirection: 'Cinematic, ultra-sharp 4K commercial lighting, clean Dubai villa interior',
                     brandName: 'Spectra Property Maintenance Dubai',
                     brandDescription: 'Dubai luxury villa & commercial HVAC, plumbing, and property care',
+                    baseWebhookUrl: webhookUrl.trim(),
                     briefWebhookUrl: videoBriefWebhookUrl.trim()
                 })
             });
@@ -581,9 +633,14 @@ export default function AIContentStudioPage() {
                 setActiveOutputTab('visual_assets');
                 setWebhookResult({
                     success: true,
-                    message: data.webhookDispatched
-                        ? `Video brief created (#${data.job.id.slice(0, 8)}) and voiceover synthesized via n8n`
-                        : `Video brief & storyboard ready (#${data.job.id.slice(0, 8)}). Ready to render clips.`
+                    message: `Video brief created (#${data.job.id.slice(0, 8)}) and voiceover synthesized via n8n`
+                });
+                fetchRecentVideoJobs();
+            } else if (data.success && data.pendingWebhookCreation) {
+                setActiveOutputTab('visual_assets');
+                setWebhookResult({
+                    success: true,
+                    message: 'Workflow 1 (spectra-video-brief) triggered. Refreshing recent video jobs...'
                 });
                 fetchRecentVideoJobs();
             } else {
@@ -591,6 +648,9 @@ export default function AIContentStudioPage() {
                     success: false,
                     error: data.error || 'Failed to generate video brief'
                 });
+                if (data.needsWebhookConfig) {
+                    setIsWebhookModalOpen(true);
+                }
             }
         } catch (err: any) {
             console.error('Video brief creation error:', err);
@@ -606,11 +666,19 @@ export default function AIContentStudioPage() {
     // -------------------------------------------------------------
     // VIDEO WORKFLOW 2: RENDER FINAL VIDEO WITH VEO ENGINE
     // -------------------------------------------------------------
-    const handleRenderVideo = async (jobIdToRender?: string) => {
+    const handleRenderVideo = async (
+        jobIdToRender?: string,
+        overrideEngine?: 'veo-3.1-fast' | 'veo-3.1-lite' | 'veo-3.1-standard'
+    ) => {
         const targetJobId = jobIdToRender || activeVideoJob?.id;
         if (!targetJobId) return;
 
         setIsRenderingVideo(true);
+        setWebhookResult(null);
+        setVideoStatusFeedback(null);
+        if (overrideEngine) {
+            setVideoEngine(overrideEngine);
+        }
         try {
             const res = await fetch('/api/ai/video-jobs', {
                 method: 'POST',
@@ -618,28 +686,38 @@ export default function AIContentStudioPage() {
                 body: JSON.stringify({
                     action: 'render',
                     jobId: targetJobId,
+                    ...(overrideEngine ? { overrideEngine } : {}),
                     wantsSubtitles: videoWantsSubtitles,
                     subtitleStyle: videoSubtitleStyle,
                     shots_json: activeVideoJob?.shots_json,
                     voiceover_script: activeVideoJob?.voiceover_script,
+                    baseWebhookUrl: webhookUrl.trim(),
                     renderWebhookUrl: videoRenderWebhookUrl.trim()
                 })
             });
 
             const data = await res.json();
-            if (data.success) {
-                setActiveVideoJob((prev: any) => prev ? ({ ...prev, status: 'rendering' }) : prev);
+            if (data.success && data.webhookDispatched !== false) {
+                setActiveVideoJob((prev: any) => prev ? ({
+                    ...prev,
+                    ...(overrideEngine ? { engine: overrideEngine } : {}),
+                    status: 'rendering',
+                    error_detail: null
+                }) : prev);
                 setWebhookResult({
                     success: true,
-                    message: `Video render started (#${targetJobId.slice(0, 8)}). Veo AI generating clips and stitching final MP4.`
+                    message: `Workflow 2 (spectra-video-render) triggered (#${targetJobId.slice(0, 8)})${overrideEngine ? ` using ${overrideEngine}` : ''}. Veo AI is generating clips and stitching final MP4.`
                 });
                 startPollingVideoJob(targetJobId);
             } else {
                 setWebhookResult({
                     success: false,
-                    error: data.error || 'Failed to trigger video render'
+                    error: data.error || 'Failed to trigger Workflow 2 (spectra-video-render)'
                 });
                 setIsRenderingVideo(false);
+                if (data.needsWebhookConfig) {
+                    setIsWebhookModalOpen(true);
+                }
             }
         } catch (err: any) {
             console.error('Video render trigger error:', err);
@@ -648,6 +726,48 @@ export default function AIContentStudioPage() {
                 error: err.message || 'Failed to contact render service'
             });
             setIsRenderingVideo(false);
+        }
+    };
+
+    // Reset a queued/stuck render job back to draft_ready
+    const handleResetVideoDraft = async (jobIdToReset?: string) => {
+        const targetJobId = jobIdToReset || activeVideoJob?.id;
+        if (!targetJobId) return;
+
+        if (videoPollingIntervalRef.current) {
+            clearInterval(videoPollingIntervalRef.current);
+            videoPollingIntervalRef.current = null;
+        }
+        setIsRenderingVideo(false);
+
+        try {
+            const res = await fetch('/api/ai/video-jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'reset_draft',
+                    jobId: targetJobId
+                })
+            });
+            const data = await res.json();
+            if (data.success && data.job) {
+                setActiveVideoJob(data.job);
+                setWebhookResult({
+                    success: true,
+                    message: `Job #${targetJobId.slice(0, 8)} reset to Draft Ready. Configure webhooks and click Render Final Video.`
+                });
+                fetchRecentVideoJobs();
+            } else {
+                setWebhookResult({
+                    success: false,
+                    error: data.error || 'Could not reset video job status'
+                });
+            }
+        } catch (err: any) {
+            setWebhookResult({
+                success: false,
+                error: err.message || 'Failed to reset video job status'
+            });
         }
     };
 
@@ -932,21 +1052,29 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                         </Button>
 
                         {/* Webhook Settings Pill */}
-                        <button
-                            type="button"
-                            onClick={() => setIsWebhookModalOpen(true)}
-                            className={`px-3.5 py-2.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 transition-all shadow-sm backdrop-blur-md h-11 ${
-                                webhookUrl
-                                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
-                                    : 'bg-amber-950/60 text-amber-300 border-amber-500/40 hover:bg-amber-900/60'
-                            }`}
-                        >
-                            <span className={`w-2 h-2 rounded-full ${webhookUrl ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                            <span className="truncate max-w-[130px] sm:max-w-none">
-                                {webhookUrl ? 'Webhook Connected' : 'Configure Webhook'}
-                            </span>
-                            <Settings className="h-3.5 w-3.5 text-slate-300 ml-0.5" />
-                        </button>
+                        {(() => {
+                            const hasVideoWebhooks = Boolean((videoBriefWebhookUrl && videoRenderWebhookUrl) || webhookUrl);
+                            const isConnected = isVideoFormat ? hasVideoWebhooks : Boolean(webhookUrl);
+                            return (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsWebhookModalOpen(true)}
+                                    className={`px-3.5 py-2.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 transition-all shadow-sm backdrop-blur-md h-11 ${
+                                        isConnected
+                                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                                            : 'bg-amber-950/60 text-amber-300 border-amber-500/40 hover:bg-amber-900/60'
+                                    }`}
+                                >
+                                    <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                                    <span className="truncate max-w-[150px] sm:max-w-none">
+                                        {isVideoFormat
+                                            ? (isConnected ? 'Video Webhooks Ready' : 'Configure Video Webhooks')
+                                            : (isConnected ? 'Webhook Connected' : 'Configure Webhook')}
+                                    </span>
+                                    <Settings className="h-3.5 w-3.5 text-slate-300 ml-0.5" />
+                                </button>
+                            );
+                        })()}
 
                         {/* Primary Generate Button */}
                         <Button
@@ -1035,10 +1163,10 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             size="sm"
                             variant="outline"
                             onClick={() => setShowPayloadModal(true)}
-                            className="text-xs font-semibold bg-white border-slate-300 rounded-xl"
+                            className="text-xs font-semibold bg-white text-slate-800 hover:bg-slate-50 hover:text-slate-900 border-slate-300 rounded-xl"
                         >
                             <Code className="h-3.5 w-3.5 mr-1.5 text-violet-600" />
-                            Inspect Job
+                            <span>Inspect Job</span>
                         </Button>
                     </div>
                 </div>
@@ -1054,7 +1182,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                     <div className="p-2 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex items-center justify-between gap-1.5 sm:gap-2">
                         {[
                             { step: 1, label: "1. Asset Format", sub: format.toUpperCase() },
-                            { step: 2, label: "2. Model & Specs", sub: activeModelObj.name },
+                            { step: 2, label: "2. Model & Specs", sub: isVideoFormat ? `${videoEngine} · ${videoResolution}` : activeModelObj.name },
                             { step: 3, label: "3. Prompt & Generate", sub: prompt ? "Prompt Ready" : "Drafting" }
                         ].map((s) => {
                             const isCurrent = activeStep === s.step;
@@ -1244,7 +1372,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                     </CardDescription>
                                 </div>
                                 <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                    {isVideoFormat ? `${activeVideoCost.formattedRate} · Est: ${activeVideoCost.formattedTotal}` : activeModelObj.priceEst}
+                                    {isVideoFormat ? `${editorVideoCost.formattedRate} · Est: ${editorVideoCost.formattedTotal}` : activeModelObj.priceEst}
                                 </span>
                             </CardHeader>
 
@@ -1262,7 +1390,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                     <span>Google Veo Video Engine</span>
                                                 </Label>
                                                 <span className="text-[11px] text-slate-500 font-mono">
-                                                    Rate: {activeVideoCost.formattedRate}
+                                                    Rate: {editorVideoCost.formattedRate}
                                                 </span>
                                             </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -1886,9 +2014,9 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                     <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
                                         {isVideoFormat ? (
                                             <>
-                                                <span>{activeVideoCost.modelName}</span>
+                                                <span>{editorVideoCost.modelName}</span>
                                                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-mono font-medium border border-emerald-200/60">
-                                                    {activeVideoCost.formattedRate}
+                                                    {editorVideoCost.formattedRate}
                                                 </span>
                                                 <span className="text-[10px] text-slate-400">
                                                     ({videoShotCount} shots · {videoDurationS}s/shot · {videoResolution} · {videoWantsSubtitles ? 'CC Subtitles' : 'No Subtitles'})
@@ -1957,7 +2085,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                 <div className="flex items-center gap-2">
                                     <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
                                         <Receipt className="h-3 w-3 text-emerald-600" />
-                                        <span>Cost: {isVideoFormat ? activeVideoCost.formattedTotal : activeJobCost.formattedTotal}</span>
+                                        <span>Cost: {isVideoFormat ? editorVideoCost.formattedTotal : activeJobCost.formattedTotal}</span>
                                     </span>
                                 </div>
                             </CardHeader>
@@ -2118,7 +2246,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                         <div className="flex items-center gap-1.5 text-xs text-slate-500">
                                             <span>Est. Job Total:</span>
                                             <span className="font-bold font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/70">
-                                                {isVideoFormat ? activeVideoCost.formattedTotal : activeJobCost.formattedTotal}
+                                                {isVideoFormat ? editorVideoCost.formattedTotal : activeJobCost.formattedTotal}
                                             </span>
                                         </div>
                                     </div>
@@ -2128,30 +2256,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                            VIDEO ACTION BUTTONS (WORKFLOW 1 BRIEF & WORKFLOW 2 RENDER)
                                            ------------------------------------------------------------- */
                                         <div className="space-y-2">
-                                            {isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
-                                                <div className="space-y-2">
-                                                    <Button
-                                                        type="button"
-                                                        onClick={() => handleRefreshVideoStatus()}
-                                                        disabled={isRefreshingVideoStatus}
-                                                        className="w-full h-12 bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white font-bold rounded-2xl shadow-md text-sm gap-2"
-                                                    >
-                                                        <RefreshCw className={`h-4 w-4 ${isRefreshingVideoStatus ? 'animate-spin' : ''}`} />
-                                                        <span>{isRefreshingVideoStatus ? 'Checking Video Engine...' : 'Check Video Render Status (Railway)'}</span>
-                                                    </Button>
-                                                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
-                                                        <span>Rendering clips on Railway Veo engine...</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleRefreshVideoStatus()}
-                                                            disabled={isRefreshingVideoStatus}
-                                                            className="text-cyan-600 hover:underline font-semibold"
-                                                        >
-                                                            Refresh Now
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed') ? (
+                                            {(activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed') ? (
                                                 <div className="space-y-2">
                                                     <Button
                                                         type="button"
@@ -2173,6 +2278,29 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                             className="text-violet-600 hover:underline font-semibold"
                                                         >
                                                             Create New Brief
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
+                                                <div className="space-y-2">
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => handleRefreshVideoStatus()}
+                                                        disabled={isRefreshingVideoStatus}
+                                                        className="w-full h-12 bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-700 hover:to-emerald-700 text-white font-bold rounded-2xl shadow-md text-sm gap-2"
+                                                    >
+                                                        <RefreshCw className={`h-4 w-4 ${isRefreshingVideoStatus ? 'animate-spin' : ''}`} />
+                                                        <span>{isRefreshingVideoStatus ? 'Checking Video Engine...' : 'Check Video Render Status (Railway)'}</span>
+                                                    </Button>
+                                                    <div className="flex items-center justify-between text-[11px] px-1 text-slate-500">
+                                                        <span>Rendering clips on Railway Veo engine...</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRefreshVideoStatus()}
+                                                            disabled={isRefreshingVideoStatus}
+                                                            className="text-cyan-600 hover:underline font-semibold"
+                                                        >
+                                                            Refresh Now
                                                         </button>
                                                     </div>
                                                 </div>
@@ -2323,20 +2451,25 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                             <RefreshCw className="h-3 w-3 animate-spin text-violet-600" />
                                             <span>Briefing...</span>
                                         </span>
+                                    ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed') ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                                            <span>Video Ready</span>
+                                        </span>
                                     ) : isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
                                         <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-cyan-100 text-cyan-800 border border-cyan-200 flex items-center gap-1.5">
                                             <RefreshCw className="h-3 w-3 animate-spin text-cyan-600" />
                                             <span>Rendering Veo...</span>
                                         </span>
-                                    ) : activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed' ? (
-                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                                            <CheckCircle className="h-3 w-3 text-emerald-600" />
-                                            <span>Video Ready</span>
-                                        </span>
                                     ) : activeVideoJob?.status === 'draft_ready' ? (
                                         <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 flex items-center gap-1">
                                             <CheckCircle className="h-3 w-3 text-violet-600" />
                                             <span>Brief Ready</span>
+                                        </span>
+                                    ) : activeVideoJob?.status === 'failed' ? (
+                                        <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
+                                            <AlertCircle className="h-3 w-3 text-rose-600" />
+                                            <span>Render Failed</span>
                                         </span>
                                     ) : (
                                         <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
@@ -2372,12 +2505,26 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
 
                         {/* Status Feedback Banner */}
                         {videoStatusFeedback && (
-                            <div className="mx-5 mt-3 p-2.5 rounded-xl bg-violet-50 border border-violet-200 text-violet-900 text-xs font-medium flex items-center justify-between">
+                            <div className={`mx-5 mt-3 p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between ${
+                                activeVideoJob?.status === 'failed' || videoStatusFeedback.toLowerCase().includes('failed')
+                                    ? 'bg-rose-50 border-rose-200 text-rose-900'
+                                    : 'bg-violet-50 border-violet-200 text-violet-900'
+                            }`}>
                                 <div className="flex items-center gap-2">
-                                    <Sparkles className="h-4 w-4 text-violet-600 flex-shrink-0" />
+                                    {activeVideoJob?.status === 'failed' || videoStatusFeedback.toLowerCase().includes('failed')
+                                        ? <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+                                        : <Sparkles className="h-4 w-4 text-violet-600 flex-shrink-0" />}
                                     <span>{videoStatusFeedback}</span>
                                 </div>
-                                <button type="button" onClick={() => setVideoStatusFeedback(null)} className="text-violet-400 hover:text-violet-700 text-xs font-bold px-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setVideoStatusFeedback(null)}
+                                    className={`text-xs font-bold px-1 ${
+                                        activeVideoJob?.status === 'failed' || videoStatusFeedback.toLowerCase().includes('failed')
+                                            ? 'text-rose-400 hover:text-rose-700'
+                                            : 'text-violet-400 hover:text-violet-700'
+                                    }`}
+                                >
                                     ✕
                                 </button>
                             </div>
@@ -2493,6 +2640,57 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                         Workflow: spectra-video-brief
                                                     </div>
                                                 </div>
+                                            ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url || activeVideoJob?.status === 'completed') ? (
+                                                /* FINAL RENDERED VIDEO PLAYER */
+                                                <div className="space-y-3">
+                                                    <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-950 shadow-md p-2">
+                                                        <video
+                                                            controls
+                                                            playsInline
+                                                            className="w-full rounded-xl aspect-[9/16] max-h-[500px] mx-auto bg-black"
+                                                            src={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
+                                                        />
+                                                        <div className="p-3 flex flex-wrap items-center justify-between gap-2">
+                                                            <div>
+                                                                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                                                    <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                                                                    <span>Final Render Complete</span>
+                                                                </span>
+                                                                <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+                                                                    {activeVideoJob.engine} · {activeVideoJob.resolution} · {
+                                                                        activeVideoJob.actual_cost_usd !== undefined && activeVideoJob.actual_cost_usd !== null
+                                                                            ? `Actual Cost: $${Number(activeVideoJob.actual_cost_usd).toFixed(2)} (AED ${(Number(activeVideoJob.actual_cost_usd) * 3.6725).toFixed(2)})`
+                                                                            : activeJobVideoCost.formattedTotal
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    onClick={() => handleRefreshVideoStatus()}
+                                                                    disabled={isRefreshingVideoStatus}
+                                                                    className="text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg h-8 px-2.5"
+                                                                    title="Re-check status and metrics from Railway engine"
+                                                                >
+                                                                    <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshingVideoStatus ? 'animate-spin text-cyan-400' : ''}`} />
+                                                                    <span>Sync</span>
+                                                                </Button>
+                                                                <a
+                                                                    href={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
+                                                                    download={`spectra-reel-${activeVideoJob.id.slice(0, 8)}.mp4`}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+                                                                >
+                                                                    <Download className="h-3.5 w-3.5" />
+                                                                    <span>Download MP4</span>
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             ) : isRenderingVideo || activeVideoJob?.status === 'rendering' ? (
                                                 <div className="p-6 rounded-2xl bg-gradient-to-br from-cyan-50 to-emerald-50 border border-cyan-200 text-center space-y-3.5">
                                                     <div className="w-12 h-12 mx-auto rounded-2xl bg-cyan-600 text-white flex items-center justify-center shadow-lg shadow-cyan-500/30">
@@ -2537,57 +2735,87 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshingVideoStatus ? 'animate-spin' : ''}`} />
                                                             <span>{isRefreshingVideoStatus ? 'Checking Railway Engine...' : 'Check Render Status'}</span>
                                                         </Button>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => handleRenderVideo(activeVideoJob?.id)}
+                                                            disabled={isRenderingVideo}
+                                                            className="bg-white hover:bg-cyan-50 text-cyan-800 border-cyan-300 font-semibold text-xs h-8 px-3 rounded-xl gap-1.5"
+                                                        >
+                                                            <Zap className="h-3.5 w-3.5" />
+                                                            <span>Re-trigger Workflow 2</span>
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            onClick={() => handleResetVideoDraft(activeVideoJob?.id)}
+                                                            className="text-slate-600 hover:text-slate-900 hover:bg-white/70 text-xs h-8 px-2.5 rounded-xl"
+                                                        >
+                                                            <span>Reset to Draft</span>
+                                                        </Button>
                                                     </div>
+                                                    {(!activeVideoJob?.render_progress?.stage || activeVideoJob?.render_progress?.stage === 'queued') && (activeVideoJob?.render_progress?.percent || 0) === 0 && (
+                                                        <p className="text-[11px] text-amber-800 bg-amber-50/90 border border-amber-200 rounded-xl py-1.5 px-3 max-w-md mx-auto">
+                                                            Stuck at Queued 0%? Check <button type="button" onClick={() => setIsWebhookModalOpen(true)} className="underline font-bold">Configure Webhook</button> and click <strong>Re-trigger Workflow 2</strong>.
+                                                        </p>
+                                                    )}
                                                 </div>
-                                            ) : (activeVideoJob?.output_video_url || activeVideoJob?.final_video_url) ? (
-                                                /* FINAL RENDERED VIDEO PLAYER */
-                                                <div className="space-y-3">
-                                                    <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-950 shadow-md p-2">
-                                                        <video
-                                                            controls
-                                                            playsInline
-                                                            className="w-full rounded-xl aspect-[9/16] max-h-[500px] mx-auto bg-black"
-                                                            src={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
-                                                        />
-                                                        <div className="p-3 flex flex-wrap items-center justify-between gap-2">
-                                                            <div>
-                                                                <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                                                                    <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                                                                    <span>Final Render Complete</span>
-                                                                </span>
-                                                                <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
-                                                                    {activeVideoJob.engine} · {activeVideoJob.resolution} · {
-                                                                        activeVideoJob.actual_cost_usd !== undefined && activeVideoJob.actual_cost_usd !== null
-                                                                            ? `Actual Cost: $${Number(activeVideoJob.actual_cost_usd).toFixed(2)} (AED ${(Number(activeVideoJob.actual_cost_usd) * 3.6725).toFixed(2)})`
-                                                                            : activeVideoCost.formattedTotal
-                                                                    }
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <Button
-                                                                    type="button"
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    onClick={() => handleRefreshVideoStatus()}
-                                                                    disabled={isRefreshingVideoStatus}
-                                                                    className="text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg h-8 px-2.5"
-                                                                    title="Re-check status and metrics from Railway engine"
-                                                                >
-                                                                    <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshingVideoStatus ? 'animate-spin text-cyan-400' : ''}`} />
-                                                                    <span>Sync</span>
-                                                                </Button>
-                                                                <a
-                                                                    href={activeVideoJob.output_video_url || activeVideoJob.final_video_url}
-                                                                    download={`spectra-reel-${activeVideoJob.id.slice(0, 8)}.mp4`}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm"
-                                                                >
-                                                                    <Download className="h-3.5 w-3.5" />
-                                                                    <span>Download MP4</span>
-                                                                </a>
-                                                            </div>
+                                            ) : activeVideoJob?.status === 'failed' ? (
+                                                <div className="p-5 rounded-2xl bg-rose-50 border border-rose-200 space-y-3">
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0">
+                                                            <AlertCircle className="h-5 w-5" />
                                                         </div>
+                                                        <div className="min-w-0 flex-1 space-y-1">
+                                                            <h4 className="text-sm font-bold text-rose-950">
+                                                                Video Render Failed (#{activeVideoJob.id?.slice(0, 8)})
+                                                            </h4>
+                                                            <p className="text-xs font-mono text-rose-800 break-words bg-white/80 p-2 rounded-xl border border-rose-200">
+                                                                {activeVideoJob.error_detail || 'Railway render engine returned an error.'}
+                                                            </p>
+                                                            {(activeVideoJob.error_detail || '').toLowerCase().includes('read timed out') && (
+                                                                <p className="text-[11px] text-rose-700 leading-relaxed">
+                                                                    Google Vertex AI (<code className="font-mono">us-central1-aiplatform.googleapis.com</code>) took longer than Railway&apos;s 60s HTTP timeout
+                                                                    {activeVideoJob.engine === 'veo-3.1-standard' ? ' while rendering veo-3.1-standard.' : '.'}{' '}
+                                                                    You can retry directly{activeVideoJob.engine !== 'veo-3.1-fast' ? ' or switch to veo-3.1-fast for faster Vertex AI turnaround' : ''}.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={() => handleRenderVideo(activeVideoJob.id)}
+                                                            disabled={isRenderingVideo}
+                                                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs h-8 px-3.5 rounded-xl gap-1.5"
+                                                        >
+                                                            <RefreshCw className={`h-3.5 w-3.5 ${isRenderingVideo ? 'animate-spin' : ''}`} />
+                                                            <span>Retry Render ({activeVideoJob.engine || videoEngine})</span>
+                                                        </Button>
+                                                        {activeVideoJob.engine !== 'veo-3.1-fast' && (
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                onClick={() => handleRenderVideo(activeVideoJob.id, 'veo-3.1-fast')}
+                                                                disabled={isRenderingVideo}
+                                                                className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs h-8 px-3.5 rounded-xl gap-1.5"
+                                                            >
+                                                                <Zap className="h-3.5 w-3.5" />
+                                                                <span>Switch to veo-3.1-fast &amp; Retry</span>
+                                                            </Button>
+                                                        )}
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => handleResetVideoDraft(activeVideoJob.id)}
+                                                            className="bg-white text-slate-800 hover:bg-slate-50 border-rose-200 text-xs h-8 px-3 rounded-xl font-semibold"
+                                                        >
+                                                            <span>Reset to Draft</span>
+                                                        </Button>
                                                     </div>
                                                 </div>
                                             ) : null}
@@ -3800,11 +4028,13 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                 onChange={(e) => {
                                     const val = e.target.value;
                                     setTempWebhookUrl(val);
-                                    if (val && !tempVideoBriefWebhookUrl) {
-                                        setTempVideoBriefWebhookUrl(val.replace(/spectra-studio-generate/g, 'spectra-video-brief'));
+                                    const derivedBrief = deriveVideoWebhookUrl(val, 'spectra-video-brief');
+                                    const derivedRender = deriveVideoWebhookUrl(val, 'spectra-video-render');
+                                    if (derivedBrief && !tempVideoBriefWebhookUrl) {
+                                        setTempVideoBriefWebhookUrl(derivedBrief);
                                     }
-                                    if (val && !tempVideoRenderWebhookUrl) {
-                                        setTempVideoRenderWebhookUrl(val.replace(/spectra-studio-generate/g, 'spectra-video-render'));
+                                    if (derivedRender && !tempVideoRenderWebhookUrl) {
+                                        setTempVideoRenderWebhookUrl(derivedRender);
                                     }
                                 }}
                                 placeholder="https://your-n8n.cloud/webhook/spectra-studio-generate"

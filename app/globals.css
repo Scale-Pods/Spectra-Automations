@@ -223,6 +223,24 @@
         transform: scale(0.98) !important;
     }
 
+    /* Vertically centered input action buttons (such as Show/Hide Password toggles) */
+    .password-toggle-btn,
+    .password-toggle-btn:hover,
+    .password-toggle-btn:active,
+    button[aria-label*="password" i],
+    button[aria-label*="password" i]:hover,
+    button[aria-label*="password" i]:active {
+        transform: translateY(-50%) !important;
+        transition: color 0.15s ease, opacity 0.15s ease !important;
+    }
+
+    /* Buttons that should remain completely stationary on hover or click */
+    button.no-hover-shift,
+    button.no-hover-shift:hover,
+    button.no-hover-shift:active {
+        transform: none !important;
+    }
+
     /* Glass Inputs */
     input, select, textarea, .glass-input {
         background: #FFFFFF !important;

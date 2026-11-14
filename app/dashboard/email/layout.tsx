@@ -18,7 +18,8 @@ import {
     Mail,
     UserMinus,
     Smartphone,
-    ShieldCheck
+    ShieldCheck,
+    Users
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,11 @@ const emailSidebarItems = [
         title: "Emails Sent",
         href: "/dashboard/email/sent",
         icon: Send,
+    },
+    {
+        title: "Unique Leads",
+        href: "/dashboard/email/leads",
+        icon: Users,
     },
     {
         title: "Analytics",

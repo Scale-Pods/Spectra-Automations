@@ -372,7 +372,7 @@ export default function VoiceLogsPage() {
                         <p className="text-[var(--label-secondary)]">Comprehensive history across all accounts and providers.</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <DateRangePicker onUpdate={(values) => setDateRange(values.range)} />
+                        <DateRangePicker value={dateRange} onUpdate={(values) => setDateRange(values.range)} />
                         <Button variant="outline" onClick={handleRefresh} disabled={loading}>
                             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                             Refresh

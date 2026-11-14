@@ -70,7 +70,7 @@ export default function MasterDashboard() {
         to: new Date()
     });
 
-    const loading = loadingMasterMetrics || loadingLeads;
+    const loading = (loadingMasterMetrics || loadingLeads) && !masterMetrics;
 
     // Trigger dynamic metrics, leads, and approvals telemetry re-fetch on mount and when dateRange changes
     useEffect(() => {

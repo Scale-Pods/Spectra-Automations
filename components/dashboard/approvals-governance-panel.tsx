@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
 import { subDays, startOfDay, endOfDay } from "date-fns";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 import {
     ApprovalDetailModal,
     APPROVAL_STATUS_META,
@@ -40,8 +41,11 @@ interface ApprovalsGovernancePanelProps {
 }
 
 export function ApprovalsGovernancePanel({ customerId, compact = false }: ApprovalsGovernancePanelProps) {
+    const initialCacheKey = `approvals-panel:${customerId || 'all'}:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const cachedInitial = getCachedData<any>(initialCacheKey);
+
     const [activeTab, setActiveTab] = useState<"approvals" | "notifications">("approvals");
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(!cachedInitial);
     const [refreshing, setRefreshing] = useState(false);
 
     // Date filter: default to Last 7 days in dashboard view
@@ -54,9 +58,9 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
               }
     );
 
-    const [approvals, setApprovals] = useState<any[]>([]);
-    const [notifications, setNotifications] = useState<any[]>([]);
-    const [approvalsSummary, setApprovalsSummary] = useState<any>({
+    const [approvals, setApprovals] = useState<any[]>(() => cachedInitial?.approvals || []);
+    const [notifications, setNotifications] = useState<any[]>(() => cachedInitial?.notifications || []);
+    const [approvalsSummary, setApprovalsSummary] = useState<any>(() => cachedInitial?.approvalsSummary || {
         total: 0,
         reviewRequired: 0,
         awaitingCustomer: 0,
@@ -65,7 +69,7 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
         rejected: 0,
         totalApprovedAed: 0,
     });
-    const [notificationsSummary, setNotificationsSummary] = useState<any>({
+    const [notificationsSummary, setNotificationsSummary] = useState<any>(() => cachedInitial?.notificationsSummary || {
         total: 0,
         verifiedSent: 0,
         delivered: 0,
@@ -109,6 +113,9 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                     setNotifications(data.notifications || []);
                     if (data.approvalsSummary) setApprovalsSummary(data.approvalsSummary);
                     if (data.notificationsSummary) setNotificationsSummary(data.notificationsSummary);
+
+                    const cacheKey = `approvals-panel:${customerId || 'all'}:${dateRange?.from?.toISOString().slice(0, 10) || 'all'}:${dateRange?.to?.toISOString().slice(0, 10) || 'all'}`;
+                    setCachedData(cacheKey, data);
                 }
             } catch (err) {
                 console.error("Failed to fetch approvals & notifications:", err);
@@ -121,8 +128,10 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
     );
 
     useEffect(() => {
-        fetchData(true);
-    }, [fetchData]);
+        const cacheKey = `approvals-panel:${customerId || 'all'}:${dateRange?.from?.toISOString().slice(0, 10) || 'all'}:${dateRange?.to?.toISOString().slice(0, 10) || 'all'}`;
+        const hasCache = !!getCachedData(cacheKey);
+        fetchData(!hasCache);
+    }, [fetchData, customerId, dateRange]);
 
     // Reset pagination when filters change
     useEffect(() => {

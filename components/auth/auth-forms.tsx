@@ -119,7 +119,7 @@ export function AuthForms({ defaultMode = 'login', onSuccess }: { defaultMode?: 
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 focus:outline-none transition-colors p-1 rounded-md"
+                                        className="password-toggle-btn absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 focus:outline-none transition-colors p-1 rounded-md"
                                         aria-label={showPassword ? "Hide password" : "Show password"}
                                     >
                                         {showPassword ? (

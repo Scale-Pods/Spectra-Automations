@@ -19,6 +19,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { subDays, format } from "date-fns";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 import {
     AreaChart,
     Area,
@@ -39,17 +40,25 @@ export default function EmailDashboardPage() {
     const [dateSubtitle, setDateSubtitle] = useState("all time");
 
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date(),
     });
 
-    const [apiAnalytics, setApiAnalytics] = useState<any>(null);
-    const [loadingApi, setLoadingApi] = useState(false);
+    const initialCacheKey = `email-page:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const [apiAnalytics, setApiAnalytics] = useState<any>(() => getCachedData(initialCacheKey));
+    const [loadingApi, setLoadingApi] = useState(() => !getCachedData(initialCacheKey));
 
     useEffect(() => {
         const fetchApiAnalytics = async () => {
             if (!dateRange?.from) return;
-            setLoadingApi(true);
+            const fromKey = dateRange.from.toISOString().slice(0, 10);
+            const toKey = (dateRange.to || dateRange.from).toISOString().slice(0, 10);
+            const currentCacheKey = `email-page:${fromKey}:${toKey}`;
+
+            const existing = getCachedData(currentCacheKey);
+            if (!existing) {
+                setLoadingApi(true);
+            }
             try {
                 const fromStr = dateRange.from.toISOString();
                 const toStr = (dateRange.to || dateRange.from).toISOString();
@@ -57,6 +66,7 @@ export default function EmailDashboardPage() {
                 if (res.ok) {
                     const data = await res.json();
                     setApiAnalytics(data);
+                    setCachedData(currentCacheKey, data);
                 }
             } catch (err) {
                 console.error("Error fetching email analytics API:", err);
@@ -72,9 +82,9 @@ export default function EmailDashboardPage() {
     }, [allLeads, dateRange]);
 
     const metrics = useMemo(() => {
-        const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent;
-        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 44;
-        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 44;
+        const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent ?? 0;
+        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 0;
+        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 0;
         const replyRate = apiAnalytics?.replyRate ?? (totalUniqueLeadContacted > 0 ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1) : "0.0");
         
         const dailyChartData = (apiAnalytics?.dailyHistory && apiAnalytics.dailyHistory.length > 0)
@@ -165,7 +175,7 @@ export default function EmailDashboardPage() {
         }
     };
 
-    const loading = loadingLeads || loadingApi;
+    const loading = (loadingLeads || loadingApi) && !apiAnalytics;
 
     return (
         <div className="space-y-8 pb-10 relative min-h-[500px]">
@@ -176,7 +186,7 @@ export default function EmailDashboardPage() {
                     <h1 className="text-2xl font-bold tracking-tight text-[var(--label-primary)]">Email Marketing Center</h1>
                     <p className="text-[var(--label-secondary)]">Monitor your campaign outreach and email activity trends</p>
                 </div>
-                <DateRangePicker onUpdate={handleDateUpdate} />
+                <DateRangePicker value={dateRange} onUpdate={handleDateUpdate} />
             </div>
 
             {/* Metric Cards Grid */}
@@ -201,7 +211,7 @@ export default function EmailDashboardPage() {
 
                 <Card
                     className="border-[var(--separator)] hover:shadow-lg transition-all cursor-pointer bg-[var(--glass-fill)]"
-                    onClick={() => router.push('/dashboard/email/sent')}
+                    onClick={() => router.push('/dashboard/email/leads')}
                 >
                     <CardContent className="p-5 flex items-center justify-between">
                         <div>

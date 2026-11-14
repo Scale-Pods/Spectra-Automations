@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, supabase } from '@/lib/supabase';
+import { getCachedData, setCachedData } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,16 @@ export async function GET(request: NextRequest) {
                 return NextResponse.json({ success: false, error: msgErr.message }, { status: 500 });
             }
             return NextResponse.json({ success: true, messages: messages || [] });
+        }
+
+        if (!includeMessages) {
+            const cacheKey = `approvals-api:${customerId || 'all'}:${approvalId || 'all'}:${from || 'none'}:${to || 'none'}:${limit}`;
+            const cached = getCachedData<any>(cacheKey);
+            if (cached) {
+                return NextResponse.json(cached, {
+                    headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+                });
+            }
         }
 
         // 1. Fetch commercial approvals (with optional customer_id / date range filters)
@@ -190,12 +201,21 @@ export async function GET(request: NextRequest) {
             byType,
         };
 
-        return NextResponse.json({
+        const responsePayload = {
             success: true,
             approvals,
             notifications,
             approvalsSummary,
             notificationsSummary,
+        };
+
+        if (!includeMessages) {
+            const cacheKey = `approvals-api:${customerId || 'all'}:${approvalId || 'all'}:${from || 'none'}:${to || 'none'}:${limit}`;
+            setCachedData(cacheKey, responsePayload);
+        }
+
+        return NextResponse.json(responsePayload, {
+            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
         });
     } catch (err: any) {
         console.error('[API /api/approvals] GET error:', err);

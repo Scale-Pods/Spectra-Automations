@@ -137,22 +137,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const [error, setError] = useState<string | null>(null);
 
     // Gatekeepers to prevent redundant identical calls
+    const lastLeadsParams = useRef<string | null>(null);
+    const hasLeads = useRef(false);
     const lastCallParams = useRef<string | null>(null);
     const lastVoiceMetricsParams = useRef<string | null>(null);
 
     const fetchLeads = useCallback(async (params?: { from?: Date; to?: Date; force?: boolean }) => {
-        setLoadingLeads(true);
+        const now = new Date();
+        const fromDate = params?.from ? startOfDay(params.from) : subDays(startOfDay(now), 7);
+        const toDate = params?.to ? endOfDay(params.to) : endOfDay(now);
+
+        const query = new URLSearchParams({
+            from: fromDate.toISOString(),
+            to: toDate.toISOString()
+        });
+        const currentQuery = query.toString();
+
+        if (!params?.force && lastLeadsParams.current === currentQuery && hasLeads.current) {
+            return;
+        }
+
+        if (leads.length === 0) {
+            setLoadingLeads(true);
+        }
+        lastLeadsParams.current = currentQuery;
+
         try {
-            const now = new Date();
-            const fromDate = params?.from ? startOfDay(params.from) : subDays(startOfDay(now), 7);
-            const toDate = params?.to ? endOfDay(params.to) : endOfDay(now);
-
-            const query = new URLSearchParams({
-                from: fromDate.toISOString(),
-                to: toDate.toISOString()
-            });
-
-            const response = await fetch(`/api/leads?${query.toString()}`);
+            const response = await fetch(`/api/leads?${currentQuery}`);
             if (!response.ok) {
                 console.error(`Failed to fetch leads: ${response.status} ${response.statusText}`);
                 throw new Error(`Failed to fetch leads (${response.status})`);
@@ -160,13 +171,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             const data = await response.json();
             const consolidated = consolidateLeads(data);
             setLeads(consolidated);
+            hasLeads.current = true;
         } catch (err: any) {
             console.error('DataProvider leads fetch error:', err);
             setError(err.message);
+            lastLeadsParams.current = null;
         } finally {
             setLoadingLeads(false);
         }
-    }, []);
+    }, [leads.length]);
 
     const fetchCalls = useCallback(async (params?: {
         from?: Date; to?: Date; provider?: string; force?: boolean;
@@ -361,13 +374,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const refreshAll = useCallback(async (params?: { from?: Date; to?: Date }) => {
         await Promise.all([
             fetchLeads(params),
-            fetchCalls(params),
-            fetchBalances(),
-            fetchVoiceMetrics(params),
             fetchMasterMetrics(params),
             fetchWhatsappMetrics(params),
+            fetchBalances(),
         ]);
-    }, [fetchLeads, fetchCalls, fetchBalances, fetchVoiceMetrics, fetchMasterMetrics, fetchWhatsappMetrics]);
+    }, [fetchLeads, fetchBalances, fetchMasterMetrics, fetchWhatsappMetrics]);
 
     const router = useRouter();
 
@@ -382,7 +393,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         didAutoExpand.current = true;
 
         if (leads.length === 0) {
-            const from = subDays(startOfDay(new Date()), 90);
+            const from = subDays(startOfDay(new Date()), 7);
             const to = endOfDay(new Date());
             // Only expand raw leads data — metrics are controlled per-page
             fetchLeads({ from, to });

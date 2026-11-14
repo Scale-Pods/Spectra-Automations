@@ -64,7 +64,7 @@ export default function ActivityPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [errors, setErrors] = useState<string[]>([]);
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date(),
     });
     const dateRangeRef = useRef(dateRange);
@@ -133,7 +133,7 @@ export default function ActivityPage() {
                         <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
                         Refresh
                     </Button>
-                    <DateRangePicker onUpdate={(values) => setDateRange(values.range)} />
+                    <DateRangePicker value={dateRange} onUpdate={(values) => setDateRange(values.range)} />
                 </div>
             </div>
 

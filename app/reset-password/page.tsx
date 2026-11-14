@@ -146,7 +146,7 @@ export default function ResetPasswordPage() {
                                         <button
                                             type="button"
                                             onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--label-secondary)] hover:text-[var(--label-primary)] focus:outline-none transition-colors p-1 rounded-md"
+                                            className="password-toggle-btn absolute right-3 top-1/2 -translate-y-1/2 text-[var(--label-secondary)] hover:text-[var(--label-primary)] focus:outline-none transition-colors p-1 rounded-md"
                                             aria-label={showPassword ? "Hide password" : "Show password"}
                                         >
                                             {showPassword ? (
@@ -175,7 +175,7 @@ export default function ResetPasswordPage() {
                                         <button
                                             type="button"
                                             onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--label-secondary)] hover:text-[var(--label-primary)] focus:outline-none transition-colors p-1 rounded-md"
+                                            className="password-toggle-btn absolute right-3 top-1/2 -translate-y-1/2 text-[var(--label-secondary)] hover:text-[var(--label-primary)] focus:outline-none transition-colors p-1 rounded-md"
                                             aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                                         >
                                             {showConfirmPassword ? (

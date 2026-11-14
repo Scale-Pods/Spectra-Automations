@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
 import { subDays, format } from "date-fns";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 import { useData } from "@/context/DataContext";
 import { calculateEmailMetrics } from "@/lib/email-analytics-utils";
 import {
@@ -40,15 +41,23 @@ import {
 export default function EmailAnalyticsPage() {
     const { leads: allLeads, loadingLeads } = useData();
     const [dateRange, setDateRange] = useState<DateRange | undefined>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date(),
     });
-    const [apiAnalytics, setApiAnalytics] = useState<any>(null);
-    const [loadingApi, setLoadingApi] = useState(false);
+    const initialCacheKey = `email-analytics:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const [apiAnalytics, setApiAnalytics] = useState<any>(() => getCachedData(initialCacheKey));
+    const [loadingApi, setLoadingApi] = useState(() => !getCachedData(initialCacheKey));
 
     const fetchApiAnalytics = useCallback(async () => {
         if (!dateRange?.from) return;
-        setLoadingApi(true);
+        const fromKey = dateRange.from.toISOString().slice(0, 10);
+        const toKey = (dateRange.to || dateRange.from).toISOString().slice(0, 10);
+        const currentCacheKey = `email-analytics:${fromKey}:${toKey}`;
+
+        const existing = getCachedData(currentCacheKey);
+        if (!existing) {
+            setLoadingApi(true);
+        }
         try {
             const fromStr = dateRange.from.toISOString();
             const toStr = (dateRange.to || dateRange.from).toISOString();
@@ -56,6 +65,7 @@ export default function EmailAnalyticsPage() {
             if (res.ok) {
                 const data = await res.json();
                 setApiAnalytics(data);
+                setCachedData(currentCacheKey, data);
             }
         } catch (err) {
             console.error("Error fetching email analytics API:", err);
@@ -77,9 +87,9 @@ export default function EmailAnalyticsPage() {
     }, [allLeads, dateRange]);
 
     const analytics = useMemo(() => {
-        const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent;
-        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 44;
-        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 44;
+        const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent ?? 0;
+        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 0;
+        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 0;
         const replyRate = apiAnalytics?.replyRate ?? (totalUniqueLeadContacted > 0 ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1) : "0.0");
         const totalUnsubscribed = apiAnalytics?.totalUnsubscribed !== undefined ? apiAnalytics.totalUnsubscribed : calculatedMetrics.totalUnsubscribed;
         const unsubRate = totalEmailSent > 0 ? ((totalUnsubscribed / totalEmailSent) * 100).toFixed(1) : "0.0";
@@ -134,7 +144,7 @@ export default function EmailAnalyticsPage() {
     const donutTotal = useMemo(() => {
         return donutData.reduce((acc, curr) => acc + curr.value, 0) || analytics.totalUniqueLeadContacted || 0;
     }, [donutData, analytics.totalUniqueLeadContacted]);
-    const loading = loadingLeads || loadingApi;
+    const loading = (loadingLeads || loadingApi) && !apiAnalytics;
 
     return (
         <div className="space-y-8 pb-10 relative min-h-[500px]">
@@ -146,7 +156,7 @@ export default function EmailAnalyticsPage() {
                     <p className="text-[var(--label-secondary)]">Real-time performance metrics, delivery trends, and response analytics.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                    <DateRangePicker onUpdate={handleDateUpdate} />
+                    <DateRangePicker value={dateRange} onUpdate={handleDateUpdate} />
                     <Button
                         onClick={fetchApiAnalytics}
                         variant="outline"

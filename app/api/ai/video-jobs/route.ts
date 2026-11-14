@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin, supabase } from '@/lib/supabase';
-import { calculateVideoJobCost } from '@/lib/spectra-maintenance-data';
 
 // Helper to get client (prefers supabaseAdmin for service role / bypass RLS, fallback to supabase)
 const getDb = () => supabaseAdmin || supabase;
@@ -19,6 +18,24 @@ function normalizeJobUrls(j: any) {
     j.output_video_url = url;
     j.final_video_url = url;
     return j;
+}
+
+/**
+ * Derives a video workflow webhook URL from any n8n base webhook URL
+ * (supporting spectra-studio-generate, sp-studio-generate, or arbitrary /webhook/<slug>).
+ */
+function deriveWebhookUrl(
+    baseUrl: string | undefined,
+    targetSlug: 'spectra-video-brief' | 'spectra-video-render'
+): string {
+    const trimmed = (baseUrl || '').trim();
+    if (!trimmed || (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))) {
+        return '';
+    }
+    if (/spectra-studio-generate|sp-studio-generate/.test(trimmed)) {
+        return trimmed.replace(/spectra-studio-generate|sp-studio-generate/g, targetSlug);
+    }
+    return trimmed.replace(/(\/webhook(?:-test)?\/)([^/?#]+)(\/?.*)$/, `$1${targetSlug}$3`);
 }
 
 /**
@@ -45,9 +62,21 @@ async function syncJobFromRailway(jobId: string, currentJob?: any) {
             // Build fields to update in Supabase
             const updateFields: any = {};
             if (railwayData.status) updateFields.status = railwayData.status;
-            if (railwayData.output_video_url) updateFields.output_video_url = railwayData.output_video_url;
+            if (railwayData.output_video_url) {
+                updateFields.output_video_url = railwayData.output_video_url;
+                // If Railway produced the final MP4 or completed_at is set, job is completed
+                updateFields.status = 'completed';
+                updateFields.render_progress = { stage: 'completed', percent: 100 };
+            } else if (railwayData.completed_at) {
+                updateFields.completed_at = railwayData.completed_at;
+                if (!railwayData.status || railwayData.status === 'rendering') {
+                    updateFields.status = 'completed';
+                }
+            }
             if (railwayData.actual_cost_usd !== undefined) updateFields.actual_cost_usd = railwayData.actual_cost_usd;
-            if (railwayData.render_progress) updateFields.render_progress = railwayData.render_progress;
+            if (railwayData.render_progress && !updateFields.render_progress) {
+                updateFields.render_progress = railwayData.render_progress;
+            }
             if (railwayData.error_detail !== undefined) updateFields.error_detail = railwayData.error_detail;
             if (railwayData.completed_at) updateFields.completed_at = railwayData.completed_at;
 
@@ -65,6 +94,8 @@ async function syncJobFromRailway(jobId: string, currentJob?: any) {
             const merged = {
                 ...(currentJob || {}),
                 ...railwayData,
+                status: updateFields.status || railwayData.status || currentJob?.status,
+                render_progress: updateFields.render_progress || railwayData.render_progress || currentJob?.render_progress,
                 output_video_url: railwayData.output_video_url || currentJob?.output_video_url || null,
                 final_video_url: railwayData.output_video_url || currentJob?.output_video_url || currentJob?.final_video_url || null
             };
@@ -102,6 +133,8 @@ export async function POST(req: Request) {
             styleArc = '',
             brandName = 'Spectra Property Maintenance Dubai',
             brandDescription = 'Dubai premium villa & commercial AC, plumbing, and facility management',
+            baseWebhookUrl = '',
+            webhookUrl = '',
             briefWebhookUrl = '',
             renderWebhookUrl = '',
             shots_json,
@@ -110,6 +143,7 @@ export async function POST(req: Request) {
         } = body;
 
         const db = getDb();
+        const rawBaseWebhook = baseWebhookUrl?.trim() || webhookUrl?.trim() || process.env.N8N_STUDIO_WEBHOOK_URL?.trim() || '';
 
         // -------------------------------------------------------------
         // ACTION 1: CREATE VIDEO BRIEF (Workflow 1: spectra-video-brief)
@@ -120,14 +154,26 @@ export async function POST(req: Request) {
             const chosenEngine = (['veo-3.1-fast', 'veo-3.1-lite', 'veo-3.1-standard'].includes(engine)
                 ? engine
                 : 'veo-3.1-fast') as 'veo-3.1-fast' | 'veo-3.1-lite' | 'veo-3.1-standard';
-            const chosenResolution = (['720p', '1080p', '4k'].includes(resolution)
-                ? resolution
+            const chosenResolution = (['720p', '1080p', '4k'].includes(String(resolution).toLowerCase())
+                ? String(resolution).toLowerCase()
                 : '1080p') as '720p' | '1080p' | '4k';
 
             // Resolve target webhook for brief generation
-            let targetBriefUrl = briefWebhookUrl?.trim() || process.env.N8N_VIDEO_BRIEF_WEBHOOK_URL;
-            if (!targetBriefUrl && process.env.N8N_STUDIO_WEBHOOK_URL) {
-                targetBriefUrl = process.env.N8N_STUDIO_WEBHOOK_URL.replace(/spectra-studio-generate/g, 'spectra-video-brief');
+            const targetBriefUrl =
+                briefWebhookUrl?.trim() ||
+                process.env.N8N_VIDEO_BRIEF_WEBHOOK_URL?.trim() ||
+                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-brief');
+
+            if (!targetBriefUrl || (!targetBriefUrl.startsWith('http://') && !targetBriefUrl.startsWith('https://'))) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        needsWebhookConfig: true,
+                        webhookDispatched: false,
+                        error: 'Workflow 1 (spectra-video-brief) webhook URL is not configured. Open Configure Webhook and enter your n8n webhook URL.'
+                    },
+                    { status: 400 }
+                );
             }
 
             const briefPayload = {
@@ -152,146 +198,80 @@ export async function POST(req: Request) {
             };
 
             let videoJobRecord = null;
-            let webhookDispatched = false;
-            let webhookError = null;
+            let webhookResponseText = '';
 
-            if (targetBriefUrl && (targetBriefUrl.startsWith('http://') || targetBriefUrl.startsWith('https://'))) {
-                try {
-                    const res = await fetch(targetBriefUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'User-Agent': 'Spectra-AI-Studio/2.0'
+            try {
+                const res = await fetch(targetBriefUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Spectra-AI-Studio/2.0'
+                    },
+                    body: JSON.stringify(briefPayload),
+                    signal: AbortSignal.timeout(90000)
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text();
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            webhookDispatched: false,
+                            targetUrl: targetBriefUrl,
+                            error: `Workflow 1 (spectra-video-brief) returned HTTP ${res.status}: ${errText.slice(0, 300) || res.statusText}`
                         },
-                        body: JSON.stringify(briefPayload)
-                    });
-
-                    if (res.ok) {
-                        const resData = await res.json();
-                        webhookDispatched = true;
-
-                        // n8n returns [{ json: row }] or [row] or row
-                        if (Array.isArray(resData) && resData.length > 0) {
-                            videoJobRecord = resData[0].json || resData[0];
-                        } else if (resData && typeof resData === 'object') {
-                            videoJobRecord = resData.json || resData;
-                        }
-                    } else {
-                        webhookError = `Webhook status ${res.status}: ${await res.text()}`;
-                    }
-                } catch (err: any) {
-                    console.warn('Failed contacting spectra-video-brief webhook:', err.message);
-                    webhookError = err.message;
+                        { status: 502 }
+                    );
                 }
+
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const resData = await res.json();
+                    // n8n returns [{ json: row }] or [row] or row
+                    if (Array.isArray(resData) && resData.length > 0) {
+                        videoJobRecord = resData[0].json || resData[0];
+                    } else if (resData && typeof resData === 'object') {
+                        videoJobRecord = resData.json || resData.job || resData;
+                    }
+                } else {
+                    webhookResponseText = await res.text();
+                }
+            } catch (err: any) {
+                console.warn('Failed contacting spectra-video-brief webhook:', err.message);
+                return NextResponse.json(
+                    {
+                        success: false,
+                        webhookDispatched: false,
+                        targetUrl: targetBriefUrl,
+                        error: `Could not reach Workflow 1 (spectra-video-brief): ${err.message}`
+                    },
+                    { status: 502 }
+                );
             }
 
-            // If webhook returned the job, ensure we fetch or return it
-            if (videoJobRecord && videoJobRecord.id) {
+            if (videoJobRecord && (videoJobRecord.id || videoJobRecord.jobId)) {
+                const resolvedId = videoJobRecord.id || videoJobRecord.jobId;
+                if (!videoJobRecord.id && resolvedId) {
+                    const { data: fetched } = await db
+                        .from('video_jobs')
+                        .select('*')
+                        .eq('id', resolvedId)
+                        .single();
+                    if (fetched) videoJobRecord = fetched;
+                }
                 return NextResponse.json({
                     success: true,
-                    jobId: videoJobRecord.id,
-                    job: videoJobRecord,
+                    jobId: resolvedId,
+                    job: normalizeJobUrls(videoJobRecord),
                     webhookDispatched: true
                 });
             }
 
-            // Fallback: If webhook didn't return a record or failed/not configured,
-            // create high-quality brief directly in Supabase video_jobs table
-            const costData = calculateVideoJobCost(chosenEngine, chosenResolution, safeShotCount, safeDurationS);
-            const synthesizedShots = Array.from({ length: safeShotCount }).map((_, i) => {
-                const shotIdx = i + 1;
-                if (shotIdx === 1) {
-                    return {
-                        index: 1,
-                        durationS: safeDurationS,
-                        prompt: `Cinematic wide shot in a sunny luxury Dubai villa. Thermostat reading 45°C outside heat. A resident wiping brow in discomfort as AC blows warm air. Elegant marble floors, high ceilings, modern aesthetics.`,
-                        negativePrompt: 'blurry, distorted, low quality, cartoon, watermark',
-                        onScreenText: `AC Blowing Warm in Dubai? 45°C Heat Alert`,
-                        status: 'pending',
-                        clipUrl: null,
-                        costUsd: +(costData.rateUsd * safeDurationS).toFixed(2)
-                    };
-                } else if (shotIdx === safeShotCount) {
-                    return {
-                        index: shotIdx,
-                        durationS: safeDurationS,
-                        prompt: `Crisp clean medium close-up of uniformed Spectra technician sealing the AC grille with a satisfied smile. Crystal clean icy-cold cyan airflow visible, digital gauge showing 18°C. Professional branded attire.`,
-                        negativePrompt: 'blurry, messy, distorted, text glitches',
-                        onScreenText: `Fast 45-Min Arrival Across Dubai | Book Now`,
-                        status: 'pending',
-                        clipUrl: null,
-                        costUsd: +(costData.rateUsd * safeDurationS).toFixed(2)
-                    };
-                } else {
-                    return {
-                        index: shotIdx,
-                        durationS: safeDurationS,
-                        prompt: `Macro shot of pressurized antibacterial coil cleaning foam breaking down dark Dubai dust and mold from copper fins. High-definition steam sanitation restoring pristine silver shine.`,
-                        negativePrompt: 'dirt, grunge, out of focus',
-                        onScreenText: `Deep Antibacterial Coil Wash & DEWA Power Optimization`,
-                        status: 'pending',
-                        clipUrl: null,
-                        costUsd: +(costData.rateUsd * safeDurationS).toFixed(2)
-                    };
-                }
-            });
-
-            const defaultCopy = {
-                hook: `Don't let Dubai's 45°C summer heat overpower your home AC.`,
-                body: `Spectra's certified HVAC specialists arrive at your Dubai villa or apartment in 45 minutes. Complete coil deep flush, mold sterilization, and refrigerant top-up with 90-day ice-cold warranty.`,
-                hashtags: `#DubaiACMaintenance #SpectraHomeServices #DubaiMarina #PalmJumeirah #DubaiVillas`,
-                cta: `Tap to book your AED 199 AC Deep Clean today.`
-            };
-
-            const fallbackInsertPayload = {
-                topic: briefPayload.topic,
-                platform,
-                aspect_ratio: aspectRatio,
-                video_type: videoType,
-                status: 'draft_ready',
-                engine: chosenEngine,
-                resolution: chosenResolution,
-                shots_json: synthesizedShots,
-                copy_json: defaultCopy,
-                editing_notes: {
-                    transitionStyle: 'Clean quick whip-pans between problem and technician resolution',
-                    pacing: 'Dynamic, modern commercial pacing with subtle audio swooshes',
-                    colourConsistency: 'Bright Dubai daylight warm tones shifting to crisp cool cyan icy finish'
-                },
-                voiceover_script: wantsVoiceover
-                    ? `Dubai summer heat is unforgiving. If your AC is blowing warm air or hiking your DEWA bill, don't wait. Spectra's certified cooling specialists arrive in 45 minutes with deep coil sanitization and ice-cold airflow guaranteed. Book today.`
-                    : null,
-                voiceover_url: null,
-                music_url: null,
-                music_prompt: wantsMusic ? 'Modern upbeat UAE corporate lifestyle beat with light tech synths' : null,
-                estimated_cost_usd: costData.totalUsd
-            };
-
-            const { data: insertedJob, error: insertError } = await db
-                .from('video_jobs')
-                .insert(fallbackInsertPayload)
-                .select()
-                .single();
-
-            if (insertError) {
-                console.error('Failed to insert fallback video_jobs:', insertError);
-                return NextResponse.json(
-                    {
-                        success: false,
-                        error: `Database insert failed: ${insertError.message}. Make sure table 'video_jobs' exists in Supabase.`,
-                        webhookError
-                    },
-                    { status: 500 }
-                );
-            }
-
             return NextResponse.json({
                 success: true,
-                jobId: insertedJob.id,
-                job: insertedJob,
-                webhookDispatched,
-                fallbackGenerated: true,
-                webhookError
+                webhookDispatched: true,
+                pendingWebhookCreation: true,
+                webhookResponse: webhookResponseText || 'Workflow 1 triggered cleanly; awaiting Supabase row.'
             });
         }
 
@@ -303,70 +283,139 @@ export async function POST(req: Request) {
                 return NextResponse.json({ success: false, error: 'jobId is required for render' }, { status: 400 });
             }
 
-            // If user updated shots or script, persist to video_jobs first
-            const updatePayload: any = {
-                status: 'rendering'
-            };
+            // Resolve target webhook for rendering BEFORE updating job status
+            const targetRenderUrl =
+                renderWebhookUrl?.trim() ||
+                process.env.N8N_VIDEO_RENDER_WEBHOOK_URL?.trim() ||
+                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-render');
+
+            if (!targetRenderUrl || (!targetRenderUrl.startsWith('http://') && !targetRenderUrl.startsWith('https://'))) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        needsWebhookConfig: true,
+                        webhookDispatched: false,
+                        error: 'Workflow 2 (spectra-video-render) webhook URL is not configured. Open Configure Webhook and enter your n8n webhook URL.'
+                    },
+                    { status: 400 }
+                );
+            }
+
+            // Persist any edited shots/script/copy without flipping status to rendering yet
+            const draftEdits: any = {};
+            const requestedEngine = typeof body.overrideEngine === 'string' &&
+                ['veo-3.1-fast', 'veo-3.1-lite', 'veo-3.1-standard'].includes(body.overrideEngine)
+                ? body.overrideEngine
+                : undefined;
+            if (requestedEngine) {
+                draftEdits.engine = requestedEngine;
+            }
             if (Array.isArray(shots_json)) {
-                updatePayload.shots_json = shots_json;
+                draftEdits.shots_json = shots_json;
             }
             if (voiceover_script !== undefined) {
-                updatePayload.voiceover_script = voiceover_script;
+                draftEdits.voiceover_script = voiceover_script;
             }
             if (copy_json !== undefined) {
-                updatePayload.copy_json = copy_json;
+                draftEdits.copy_json = copy_json;
+            }
+            if (Object.keys(draftEdits).length > 0) {
+                await db.from('video_jobs').update(draftEdits).eq('id', jobId);
             }
 
-            await db.from('video_jobs').update(updatePayload).eq('id', jobId);
-
-            // Resolve target webhook for rendering
-            let targetRenderUrl = renderWebhookUrl?.trim() || process.env.N8N_VIDEO_RENDER_WEBHOOK_URL;
-            if (!targetRenderUrl && process.env.N8N_STUDIO_WEBHOOK_URL) {
-                targetRenderUrl = process.env.N8N_STUDIO_WEBHOOK_URL.replace(/spectra-studio-generate/g, 'spectra-video-render');
-            }
-
-            let webhookDispatched = false;
             let webhookResponse = null;
 
-            if (targetRenderUrl && (targetRenderUrl.startsWith('http://') || targetRenderUrl.startsWith('https://'))) {
-                try {
-                    const res = await fetch(targetRenderUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'User-Agent': 'Spectra-AI-Studio/2.0'
-                        },
-                        body: JSON.stringify({
+            try {
+                const res = await fetch(targetRenderUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Spectra-AI-Studio/2.0'
+                    },
+                    body: JSON.stringify({
+                        jobId,
+                        ...(requestedEngine ? { engine: requestedEngine } : {}),
+                        wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
+                        subtitleStyle: subtitleStyle || 'bold_yellow',
+                        body: {
                             jobId,
+                            ...(requestedEngine ? { engine: requestedEngine } : {}),
                             wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
-                            subtitleStyle: subtitleStyle || 'bold_yellow',
-                            body: {
-                                jobId,
-                                wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
-                                subtitleStyle: subtitleStyle || 'bold_yellow'
-                            }
-                        })
-                    });
+                            subtitleStyle: subtitleStyle || 'bold_yellow'
+                        }
+                    }),
+                    signal: AbortSignal.timeout(25000)
+                });
 
-                    webhookDispatched = res.ok;
-                    const contentType = res.headers.get('content-type') || '';
-                    if (contentType.includes('application/json')) {
-                        webhookResponse = await res.json();
-                    } else {
-                        webhookResponse = await res.text();
-                    }
-                } catch (err: any) {
-                    console.warn('Could not contact spectra-video-render webhook:', err.message);
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    webhookResponse = await res.json();
+                } else {
+                    webhookResponse = await res.text();
                 }
+
+                if (!res.ok) {
+                    const errDetail = typeof webhookResponse === 'string'
+                        ? webhookResponse.slice(0, 300)
+                        : JSON.stringify(webhookResponse).slice(0, 300);
+                    return NextResponse.json(
+                        {
+                            success: false,
+                            webhookDispatched: false,
+                            targetUrl: targetRenderUrl,
+                            error: `Workflow 2 (spectra-video-render) returned HTTP ${res.status}: ${errDetail || res.statusText}`
+                        },
+                        { status: 502 }
+                    );
+                }
+            } catch (err: any) {
+                console.warn('Could not contact spectra-video-render webhook:', err.message);
+                return NextResponse.json(
+                    {
+                        success: false,
+                        webhookDispatched: false,
+                        targetUrl: targetRenderUrl,
+                        error: `Could not reach Workflow 2 (spectra-video-render): ${err.message}`
+                    },
+                    { status: 502 }
+                );
             }
+
+            // Only mark rendering after Workflow 2 actually accepted the webhook request
+            await db.from('video_jobs').update({ status: 'rendering', error_detail: null }).eq('id', jobId);
 
             return NextResponse.json({
                 success: true,
                 jobId,
                 status: 'rendering',
-                webhookDispatched,
+                webhookDispatched: true,
                 webhookResponse: webhookResponse || 'ScalePods video render dispatched'
             });
+        }
+
+        // -------------------------------------------------------------
+        // ACTION 2b: RESET STUCK RENDER BACK TO DRAFT
+        // -------------------------------------------------------------
+        if (action === 'reset_draft') {
+            if (!jobId) {
+                return NextResponse.json({ success: false, error: 'jobId is required' }, { status: 400 });
+            }
+
+            const { data, error } = await db
+                .from('video_jobs')
+                .update({
+                    status: 'draft_ready',
+                    error_detail: null
+                })
+                .eq('id', jobId)
+                .select()
+                .single();
+
+            if (error) {
+                return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+            }
+
+            return NextResponse.json({ success: true, job: normalizeJobUrls(data) });
         }
 
         // -------------------------------------------------------------

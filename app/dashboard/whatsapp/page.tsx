@@ -25,6 +25,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 import { LMLoader } from "@/components/spectra-loader";
 import { useData } from "@/context/DataContext";
 
@@ -32,11 +33,13 @@ export default function WhatsappDashboardPage() {
     const router = useRouter();
 
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date()
     });
-    const [loading, setLoading] = useState(true);
-    const [waData, setWaData] = useState<any>({
+    const initialKey = `wa-overview:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const cachedInitial = getCachedData<any>(initialKey);
+    const [loading, setLoading] = useState(!cachedInitial);
+    const [waData, setWaData] = useState<any>(() => cachedInitial || {
         uniqueSentCount: 0,
         sentCount: 0,
         totalReplies: 0,
@@ -46,9 +49,12 @@ export default function WhatsappDashboardPage() {
     });
 
     const fetchData = useCallback(async (from: Date, to: Date) => {
-        setLoading(true);
         const fromISO = startOfDay(from).toISOString();
         const toISO = endOfDay(to).toISOString();
+        const currentKey = `wa-overview:${fromISO.slice(0, 10)}:${toISO.slice(0, 10)}`;
+        if (!getCachedData(currentKey)) {
+            setLoading(true);
+        }
         try {
             const res = await fetch(`/api/whatsapp-leads?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
             if (!res.ok) throw new Error('Failed to fetch whatsapp leads');
@@ -99,22 +105,43 @@ export default function WhatsappDashboardPage() {
             let sentCount = 0;
             let totalReplies = 0;
             const dailyMap: Record<string, { sent: number; replied: number }> = {};
+            
+            // Seed all days in range for smooth time-series chart
+            const cur = new Date(startOfDay(from));
+            const end = endOfDay(to);
+            while (cur <= end) {
+                const dayKey = cur.toISOString().slice(0, 10);
+                dailyMap[dayKey] = { sent: 0, replied: 0 };
+                cur.setDate(cur.getDate() + 1);
+            }
+
             const uniqueLeads = new Set<string>();
 
             mergedLeads.forEach(lead => {
-                const key = lead.recipient_address || lead.phone || lead.id;
-                if (key) uniqueLeads.add(key);
-
                 const msgs: any[] = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
-                
-                if (msgs.length > 0) {
-                    const outboundCount = msgs.filter(m => m.direction === 'OUTBOUND').length;
-                    sentCount += outboundCount > 0 ? outboundCount : msgs.length;
-                    
-                    const hasInbound = msgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes';
+                const inRangeMsgs = msgs.filter(m => {
+                    const dt = m.sent_or_received_at || m.created_at;
+                    if (!dt) return false;
+                    const t = new Date(dt).getTime();
+                    return !isNaN(t) && inRange(t);
+                });
+
+                let leadContactedInRange = false;
+
+                if (inRangeMsgs.length > 0) {
+                    const outbound = inRangeMsgs.filter(m => m.direction === 'OUTBOUND');
+                    if (outbound.length > 0) {
+                        sentCount += outbound.length;
+                        leadContactedInRange = true;
+                    } else {
+                        sentCount += inRangeMsgs.length;
+                        leadContactedInRange = true;
+                    }
+
+                    const hasInbound = inRangeMsgs.some(m => m.direction === 'INBOUND');
                     if (hasInbound) totalReplies++;
 
-                    msgs.forEach(m => {
+                    inRangeMsgs.forEach(m => {
                         const dt = m.sent_or_received_at || m.created_at;
                         if (dt) {
                             const dayKey = new Date(dt).toISOString().slice(0, 10);
@@ -124,8 +151,21 @@ export default function WhatsappDashboardPage() {
                         }
                     });
                 } else {
-                    sentCount += lead.whatsapp_count || 1;
-                    if (lead.replied === 'yes') totalReplies++;
+                    const leadDate = parseDate(lead["1st_wa_ts"] || lead.wp1_parsed_date || lead.created_at);
+                    if (leadDate && inRange(leadDate.getTime())) {
+                        sentCount += lead.whatsapp_count || 1;
+                        leadContactedInRange = true;
+                        if (lead.replied === 'yes') totalReplies++;
+                        const dayKey = leadDate.toISOString().slice(0, 10);
+                        if (!dailyMap[dayKey]) dailyMap[dayKey] = { sent: 0, replied: 0 };
+                        dailyMap[dayKey].sent += lead.whatsapp_count || 1;
+                        if (lead.replied === 'yes') dailyMap[dayKey].replied++;
+                    }
+                }
+
+                if (leadContactedInRange) {
+                    const key = lead.recipient_address || lead.phone || lead.id;
+                    if (key) uniqueLeads.add(key);
                 }
             });
 
@@ -139,14 +179,16 @@ export default function WhatsappDashboardPage() {
                     replied: vals.replied,
                 }));
 
-            setWaData({
+            const newWaData = {
                 uniqueSentCount,
                 sentCount,
                 totalReplies,
                 activityReachouts: sentCount,
                 activityReplies: totalReplies,
                 trendData,
-            });
+            };
+            setWaData(newWaData);
+            setCachedData(currentKey, newWaData);
         } catch (err) {
             console.error('Error fetching whatsapp page metrics:', err);
         } finally {
@@ -186,7 +228,7 @@ export default function WhatsappDashboardPage() {
                     <h1 className="text-2xl font-bold text-[var(--label-primary)] tracking-tight">WhatsApp Overview</h1>
                     <p className="text-[var(--label-secondary)] text-sm">Real-time engagement insights and campaign totals</p>
                 </div>
-                <DateRangePicker onUpdate={(range) => setDateRange(range.range)} />
+                <DateRangePicker value={dateRange} onUpdate={(range) => setDateRange(range.range)} />
             </div>
 
             {/* Metric Cards */}

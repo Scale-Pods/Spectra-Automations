@@ -50,6 +50,7 @@ import {
 import { format, subDays } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 
 export default function EworksDashboardPage() {
     const [searchTerm, setSearchTerm] = useState("");
@@ -65,17 +66,20 @@ export default function EworksDashboardPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage, setItemsPerPage] = useState(5);
 
+    const initialCacheKey = `eworks-data:1:5::all:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const cachedInitial = getCachedData<any>(initialCacheKey);
+
     // Real API Data State
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(!cachedInitial);
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const [customers, setCustomers] = useState<EworksCustomer[]>([]);
-    const [pagination, setPagination] = useState({
+    const [customers, setCustomers] = useState<EworksCustomer[]>(() => cachedInitial?.customers || []);
+    const [pagination, setPagination] = useState(() => cachedInitial?.pagination || {
         total: 0,
         page: 1,
         limit: 5,
         totalPages: 1
     });
-    const [metrics, setMetrics] = useState({
+    const [metrics, setMetrics] = useState(() => cachedInitial?.metrics || {
         totalCustomers: 0,
         totalInvoiced: 0,
         totalReceived: 0,
@@ -97,7 +101,7 @@ export default function EworksDashboardPage() {
             oldestJobRecord: { name: 'N/A', date: 'N/A', title: 'N/A' }
         }
     });
-    const [filterCounts, setFilterCounts] = useState({
+    const [filterCounts, setFilterCounts] = useState(() => cachedInitial?.filterCounts || {
         all: 0,
         active_jobs: 0,
         pending_quotes: 0,
@@ -141,6 +145,9 @@ export default function EworksDashboardPage() {
             if (data.pagination) setPagination(data.pagination);
             if (data.metrics) setMetrics(data.metrics);
             if (data.filterCounts) setFilterCounts(data.filterCounts);
+
+            const cacheKey = `eworks-data:${currentPage}:${itemsPerPage}:${searchTerm}:${filterCategory}:${dateRange?.from?.toISOString().slice(0, 10)}:${dateRange?.to?.toISOString().slice(0, 10)}`;
+            setCachedData(cacheKey, data);
         } catch (err) {
             console.error('Error fetching live eWorks data:', err);
         } finally {
@@ -342,7 +349,7 @@ export default function EworksDashboardPage() {
                                             paddingAngle={4}
                                             dataKey="count"
                                         >
-                                            {metrics.serviceCategories.map((entry, index) => (
+                                            {metrics.serviceCategories.map((entry: any, index: number) => (
                                                 <Cell key={`cell-${index}`} fill={entry.color} />
                                             ))}
                                         </Pie>
@@ -364,7 +371,7 @@ export default function EworksDashboardPage() {
                             )}
                         </div>
                         <div className="space-y-1.5 mt-2 border-t border-slate-100 pt-3 max-h-[120px] overflow-y-auto">
-                            {metrics.serviceCategories.slice(0, 5).map((cat) => (
+                            {metrics.serviceCategories.slice(0, 5).map((cat: any) => (
                                 <div key={cat.name} className="flex items-center justify-between text-xs">
                                     <div className="flex items-center gap-2">
                                         <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />

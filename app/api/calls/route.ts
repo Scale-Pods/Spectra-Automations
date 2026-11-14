@@ -27,7 +27,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const page = parseInt(searchParams.get('page') || '1');
         const limit = parseInt(searchParams.get('limit') || '10');
 
-        const fromDate = from || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const toDate = to || new Date().toISOString();
 
         // Try RPC first

@@ -88,9 +88,10 @@ export function calculateEmailMetrics(
     if (fromD) fromD.setHours(0, 0, 0, 0);
     if (toD) toD.setHours(23, 59, 59, 999);
 
+    const hasDateRange = !!(fromD && toD);
     const checkDate = (d: Date | null) => {
-        if (!fromD || !toD) return true;
-        if (!d || isNaN(d.getTime())) return true;
+        if (!hasDateRange) return true;
+        if (!d || isNaN(d.getTime())) return false;
         return d >= fromD && d <= toD;
     };
 
@@ -124,6 +125,16 @@ export function calculateEmailMetrics(
     };
 
     const dailyMap: Record<string, { date: string; sent: number; replies: number }> = {};
+    if (fromD && toD) {
+        const cur = new Date(fromD);
+        while (cur <= toD) {
+            const dateKey = format(cur, "MMM dd");
+            if (!dailyMap[dateKey]) {
+                dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+            }
+            cur.setDate(cur.getDate() + 1);
+        }
+    }
     const processedIds = new Set<string>();
 
     (allLeads || []).forEach((lead: any) => {
@@ -135,33 +146,50 @@ export function calculateEmailMetrics(
         let leadHasEmail = false;
         let leadContacted = false;
 
+        const emailDate = lead.created_at || lead.eworks_created_on ? new Date(lead.created_at || lead.eworks_created_on) : null;
+        const emailInRange = checkDate(emailDate);
+
         // Count non-empty email_1..email_4 steps
         ['email_1', 'email_2', 'email_3', 'email_4'].forEach((col, idx) => {
             if (checkIsNonEmpty(lead[col]) || checkIsNonEmpty(lead[`${col}_status`])) {
-                totalEmails++;
-                tableStats[tableKey].emails++;
                 leadHasEmail = true;
-                leadContacted = true;
-                if (idx === 0) firstEmailCount++;
+                if (emailInRange) {
+                    totalEmails++;
+                    tableStats[tableKey].emails++;
+                    leadContacted = true;
+                    if (idx === 0) firstEmailCount++;
 
-                const emailDate = lead.created_at || lead.eworks_created_on ? new Date(lead.created_at || lead.eworks_created_on) : null;
-                if (emailDate && !isNaN(emailDate.getTime()) && checkDate(emailDate)) {
-                    const dateKey = format(emailDate, "MMM dd");
-                    if (!dailyMap[dateKey]) {
-                        dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                    if (emailDate && !isNaN(emailDate.getTime())) {
+                        const dateKey = format(emailDate, "MMM dd");
+                        if (!dailyMap[dateKey]) {
+                            dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                        }
+                        dailyMap[dateKey].sent++;
                     }
-                    dailyMap[dateKey].sent++;
                 }
             }
         });
 
         // Also check if lead has outbound messages in lead.messages
         if (lead.messages && Array.isArray(lead.messages)) {
-            const hasOutbound = lead.messages.some((m: any) => m.direction === 'OUTBOUND');
-            if (hasOutbound) {
-                leadContacted = true;
-                leadHasEmail = true;
-            }
+            lead.messages.forEach((m: any) => {
+                if (m.direction === 'OUTBOUND') {
+                    const mDate = m.sent_or_received_at || m.created_at ? new Date(m.sent_or_received_at || m.created_at) : null;
+                    if (checkDate(mDate)) {
+                        leadContacted = true;
+                        leadHasEmail = true;
+                        totalEmails++;
+                        tableStats[tableKey].emails++;
+                        if (mDate && !isNaN(mDate.getTime())) {
+                            const dateKey = format(mDate, "MMM dd");
+                            if (!dailyMap[dateKey]) {
+                                dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                            }
+                            dailyMap[dateKey].sent++;
+                        }
+                    }
+                }
+            });
         }
 
         if (leadContacted) {
@@ -176,9 +204,6 @@ export function calculateEmailMetrics(
 
         if (isReplied) {
             leadHasEmail = true;
-            replyCount++;
-            tableStats[tableKey].replies++;
-            totalLeadReplies++;
 
             let replyDate: Date | null = null;
             if (Array.isArray(lead.email_reply)) {
@@ -196,16 +221,29 @@ export function calculateEmailMetrics(
                     if (!isNaN(d.getTime())) replyDate = d;
                 }
             }
+            if (!replyDate && lead.messages && Array.isArray(lead.messages)) {
+                const inb = lead.messages.find((m: any) => m.direction === 'INBOUND');
+                if (inb) {
+                    const dStr = inb.sent_or_received_at || inb.created_at;
+                    if (dStr) replyDate = new Date(dStr);
+                }
+            }
             if (!replyDate && (lead.updated_at || lead.created_at)) {
                 replyDate = new Date(lead.updated_at || lead.created_at);
             }
 
-            if (replyDate && !isNaN(replyDate.getTime()) && checkDate(replyDate)) {
-                const dateKey = format(replyDate, "MMM dd");
-                if (!dailyMap[dateKey]) {
-                    dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+            if (checkDate(replyDate)) {
+                replyCount++;
+                tableStats[tableKey].replies++;
+                totalLeadReplies++;
+
+                if (replyDate && !isNaN(replyDate.getTime())) {
+                    const dateKey = format(replyDate, "MMM dd");
+                    if (!dailyMap[dateKey]) {
+                        dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                    }
+                    dailyMap[dateKey].replies++;
                 }
-                dailyMap[dateKey].replies++;
             }
         }
 

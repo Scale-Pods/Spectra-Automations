@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getCachedData, setCachedData } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,14 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const from = searchParams.get('from');
         const to = searchParams.get('to');
+
+        const cacheKey = `leads:${from || 'none'}:${to || 'none'}`;
+        const cached = getCachedData<any>(cacheKey);
+        if (cached) {
+            return NextResponse.json(cached, {
+                headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+            });
+        }
 
         // Fetch customers from live public.customers table
         let query = supabaseAdmin
@@ -89,14 +98,18 @@ export async function GET(request: NextRequest) {
         }
 
 
-        return NextResponse.json({
+        const responsePayload = {
             nr_wf: nrWf,
             followup: followup,
             nurture: nurture,
             master_leads: masterLeads,
             activity_leads: [],
-        }, {
-            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        };
+
+        setCachedData(cacheKey, responsePayload);
+
+        return NextResponse.json(responsePayload, {
+            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' },
         });
     } catch (error: any) {
         console.error('Error in leads route:', error);

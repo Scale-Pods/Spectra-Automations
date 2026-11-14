@@ -23,7 +23,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const from = searchParams.get('from');
         const to = searchParams.get('to');
 
-        const fromDate = from ? new Date(from).toISOString() : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        const fromDate = from ? new Date(from).toISOString() : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const toDate = to ? new Date(to).toISOString() : new Date().toISOString();
 
         // Direct computation across all 4 activity tables (naples, aspen, old, fello)
@@ -87,6 +87,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
         // Daily volume
         const dailyMap = new Map<string, { calls: number; cost: number }>();
+        const curDate = new Date(fromDate);
+        const endDate = new Date(toDate);
+        while (curDate <= endDate) {
+            const dStr = curDate.toISOString().split('T')[0];
+            dailyMap.set(dStr, { calls: 0, cost: 0 });
+            curDate.setDate(curDate.getDate() + 1);
+        }
+
         for (const r of calls) {
             const d = r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : null;
             if (!d) continue;

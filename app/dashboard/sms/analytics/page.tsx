@@ -37,6 +37,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { LMLoader } from "@/components/spectra-loader";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 
 export default function SmsAnalyticsPage() {
     const [mounted, setMounted] = useState(false);
@@ -45,19 +46,29 @@ export default function SmsAnalyticsPage() {
     }, []);
 
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date()
     });
-    const [smsData, setSmsData] = useState<{ sms_activity: any[], sms_leads: any[], total: number } | null>(null);
-    const [loading, setLoading] = useState(true);
+    const initialKey = `sms-analytics:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const cachedInitial = getCachedData<any>(initialKey);
+
+    const [smsData, setSmsData] = useState<{ sms_activity: any[], sms_leads: any[], total: number } | null>(() => cachedInitial);
+    const [loading, setLoading] = useState(!cachedInitial);
 
     const fetchAnalytics = useCallback(async (from: Date, to: Date) => {
-        setLoading(true);
+        const fromISO = startOfDay(from).toISOString();
+        const toISO = endOfDay(to).toISOString();
+        const currentKey = `sms-analytics:${fromISO.slice(0, 10)}:${toISO.slice(0, 10)}`;
+        if (!getCachedData(currentKey)) {
+            setLoading(true);
+        }
         try {
-            const fromISO = startOfDay(from).toISOString();
-            const toISO = endOfDay(to).toISOString();
             const res = await fetch(`/api/sms-leads?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
-            if (res.ok) setSmsData(await res.json());
+            if (res.ok) {
+                const data = await res.json();
+                setSmsData(data);
+                setCachedData(currentKey, data);
+            }
         } catch (e) {
             console.error('[SMS Analytics fetch]', e);
         } finally {
@@ -97,18 +108,26 @@ export default function SmsAnalyticsPage() {
         // Filter SMS activities strictly within date range
         const inRangeActivities = activities.filter(act => {
             const t = act.created_at || act.created_date;
-            if (!t) return true;
+            if (!t) return false;
             return inRange(new Date(t).getTime());
         });
 
         const totalSent = inRangeActivities.length;
         const uniquePhones = new Set(inRangeActivities.map(a => a.lead_phone || a.phone || a.lead_id)).size;
-        const uniqueSentCount = Math.max(uniquePhones, leads.length);
+        const uniqueSentCount = uniquePhones > 0 ? uniquePhones : (leads.length > 0 ? leads.length : 0);
 
         let totalReplies = 0;
         let deliveredCount = 0;
 
         const dailyMap: Record<string, { sent: number; replies: number }> = {};
+        if (from && to) {
+            const cur = new Date(from);
+            while (cur.getTime() <= to) {
+                const dayKey = format(cur, 'MMM dd');
+                dailyMap[dayKey] = { sent: 0, replies: 0 };
+                cur.setDate(cur.getDate() + 1);
+            }
+        }
         const tempCounts = { hot: 0, warm: 0, cold: 0, unassigned: 0 };
         const statusCounts = { sent: 0, delivered: 0, replied: 0, failed: 0 };
         const campaignMap: Record<string, { sent: number; replies: number }> = {};
@@ -204,7 +223,7 @@ export default function SmsAnalyticsPage() {
                     >
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
-                    <DateRangePicker onUpdate={(range) => setDateRange(range.range)} />
+                    <DateRangePicker value={dateRange} onUpdate={(range) => setDateRange(range.range)} />
                 </div>
             </div>
 

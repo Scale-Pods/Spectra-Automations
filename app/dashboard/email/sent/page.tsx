@@ -54,7 +54,7 @@ export default function SentEmailsPage() {
     const { leads: allLeads, loadingLeads } = useData();
     const [page, setPage] = useState(1);
     const [selectedLeadItem, setSelectedLeadItem] = useState<{ id: string; initialLead?: any } | null>(null);
-    const [dateRange, setDateRange] = useState<any>(undefined);
+    const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 7), to: new Date() });
     const [apiEmailLeads, setApiEmailLeads] = useState<any[]>([]);
     const [loadingApi, setLoadingApi] = useState(false);
 
@@ -228,6 +228,7 @@ export default function SentEmailsPage() {
                         />
                     </div>
                     <DateRangePicker
+                        value={dateRange}
                         className="w-full md:w-[260px]"
                         onUpdate={(values) => setDateRange(values.range)}
                     />

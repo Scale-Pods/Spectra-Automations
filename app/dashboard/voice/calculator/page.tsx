@@ -161,7 +161,7 @@ export default function VoiceCalculatorPage() {
                     <CardContent className="space-y-6">
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-[var(--label-tertiary)] uppercase tracking-wider">Date Range</label>
-                            <DateRangePicker onUpdate={(values) => setDateRange(values.range)} />
+                            <DateRangePicker value={dateRange} onUpdate={(values) => setDateRange(values.range)} />
                         </div>
 
                         <Button 

@@ -96,7 +96,7 @@ export default function VoiceAnalyticsPage() {
                             <SelectItem value="fello">Fello (fello_activity)</SelectItem>
                         </SelectContent>
                     </Select>
-                    <DateRangePicker onUpdate={(values) => setDateRange(values.range)} />
+                    <DateRangePicker value={dateRange} onUpdate={(values) => setDateRange(values.range)} />
                     <Button
                         variant="outline"
                         size="sm"

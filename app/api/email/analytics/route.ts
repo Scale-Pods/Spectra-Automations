@@ -1,19 +1,59 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { fetchMessages, parseRawPayload } from '@/lib/messages-data';
+import { subDays, startOfDay, endOfDay, eachDayOfInterval, format } from 'date-fns';
+import { getCachedData, setCachedData } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
-        const from = searchParams.get('start_date');
-        const to = searchParams.get('end_date');
+        const fromParam = searchParams.get('start_date') || searchParams.get('from');
+        const toParam = searchParams.get('end_date') || searchParams.get('to');
 
-        // Fetch all email messages from public.messages
-        const { messages } = await fetchMessages({
+        const now = new Date();
+        const fromDate = fromParam ? startOfDay(new Date(fromParam)) : startOfDay(subDays(now, 7));
+        const toDate = toParam ? endOfDay(new Date(toParam)) : endOfDay(now);
+
+        const cacheKey = `email-analytics:${fromDate.toISOString()}:${toDate.toISOString()}`;
+        const cached = getCachedData<any>(cacheKey);
+        if (cached) {
+            return NextResponse.json(cached, {
+                headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+            });
+        }
+
+        // 1. Try Supabase Postgres RPC first
+        try {
+            const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_email_dashboard_metrics', {
+                p_from: fromDate.toISOString(),
+                p_to: toDate.toISOString()
+            });
+            if (!rpcError && rpcData && typeof rpcData === 'object' && 'totalEmailSent' in rpcData) {
+                setCachedData(cacheKey, rpcData);
+                return NextResponse.json(rpcData, {
+                    headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+                });
+            }
+        } catch {
+            // Fall through to fallback
+        }
+
+        // Fetch email messages from public.messages within date range
+        const { messages: rawMessages } = await fetchMessages({
             channel: 'EMAIL',
-            limit: 1000
+            from: fromDate,
+            to: toDate,
+            limit: 2000
+        });
+
+        // Filter strictly within date range
+        const messages = rawMessages.filter(m => {
+            const dt = m.sent_or_received_at || m.created_at;
+            if (!dt) return false;
+            const d = new Date(dt);
+            return !isNaN(d.getTime()) && d >= fromDate && d <= toDate;
         });
 
         // Also fetch customer email columns as fallback/supplement
@@ -27,14 +67,25 @@ export async function GET(request: Request) {
         const contactedLeads = new Set<string>();
         const repliedLeads = new Set<string>();
         const contactedWhoReplied = new Set<string>();
+
+        // Initialize dailyMap for every day in the selected interval
         const dailyMap: Record<string, { date: string; sent: number; replies: number }> = {};
+        try {
+            const days = eachDayOfInterval({ start: fromDate, end: toDate });
+            days.forEach(d => {
+                const dateKey = format(d, 'yyyy-MM-dd');
+                dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+            });
+        } catch {
+            // In case interval is reversed or invalid, fallback to empty object
+        }
 
         // 1. Process public.messages
         messages.forEach(m => {
             const dateStr = m.sent_or_received_at || m.created_at;
-            const dateKey = dateStr ? new Date(dateStr).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            const dateKey = dateStr ? new Date(dateStr).toISOString().split('T')[0] : '';
 
-            if (!dailyMap[dateKey]) {
+            if (dateKey && !dailyMap[dateKey]) {
                 dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
             }
 
@@ -43,11 +94,11 @@ export async function GET(request: Request) {
 
             if (isReply) {
                 totalReplies++;
-                dailyMap[dateKey].replies++;
+                if (dateKey) dailyMap[dateKey].replies++;
                 if (leadKey) repliedLeads.add(leadKey);
             } else {
                 totalSent++;
-                dailyMap[dateKey].sent++;
+                if (dateKey) dailyMap[dateKey].sent++;
                 if (leadKey) contactedLeads.add(leadKey);
             }
 
@@ -67,17 +118,19 @@ export async function GET(request: Request) {
         // 2. Supplement from customers table if messages table count is small
         if (totalSent === 0 && customerRows && customerRows.length > 0) {
             customerRows.forEach((c: any) => {
+                const dateStr = c.created_at || c.eworks_created_on;
+                if (!dateStr) return;
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime()) || d < fromDate || d > toDate) return;
+
                 let sentCount = 0;
                 ['email_1', 'email_2'].forEach(col => {
                     if (c[col] && String(c[col]).trim() !== '') {
                         sentCount++;
                         totalSent++;
-                        const dateStr = c.created_at || c.eworks_created_on;
-                        if (dateStr) {
-                            const dateKey = new Date(dateStr).toISOString().split('T')[0];
-                            if (!dailyMap[dateKey]) dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
-                            dailyMap[dateKey].sent++;
-                        }
+                        const dateKey = d.toISOString().split('T')[0];
+                        if (!dailyMap[dateKey]) dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
+                        dailyMap[dateKey].sent++;
                     }
                 });
 
@@ -120,7 +173,7 @@ export async function GET(request: Request) {
             }
         };
 
-        return NextResponse.json({
+        const responsePayload = {
             totalEmailSent: totalSent,
             totalSent: totalSent,
             totalUniqueLeadContacted,
@@ -132,8 +185,12 @@ export async function GET(request: Request) {
             tableStats,
             dailyHistory,
             messages
-        }, {
-            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        };
+
+        setCachedData(cacheKey, responsePayload);
+
+        return NextResponse.json(responsePayload, {
+            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
         });
     } catch (error: any) {
         console.error('Email Analytics API Route Error:', error);

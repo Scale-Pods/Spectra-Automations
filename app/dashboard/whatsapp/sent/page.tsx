@@ -109,7 +109,7 @@ export default function WhatsappSentPage() {
                     <h1 className="text-2xl font-bold">Total Sent Messages</h1>
                     <p className="text-[var(--label-secondary)]">History of all outbound WhatsApp communications</p>
                 </div>
-                <DateRangePicker onUpdate={(val) => setDateRange(val.range)} />
+                <DateRangePicker value={dateRange} onUpdate={(val) => setDateRange(val.range)} />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">

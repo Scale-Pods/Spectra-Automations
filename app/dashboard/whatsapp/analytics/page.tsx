@@ -42,27 +42,35 @@ import {
 } from "@/components/ui/tooltip";
 import { subDays, startOfDay, endOfDay, format } from "date-fns";
 import { LMLoader } from "@/components/spectra-loader";
+import { getCachedData, setCachedData } from "@/lib/cache-utils";
 
 export default function WhatsappAnalyticsPage() {
     const router = useRouter();
 
     const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date()
     });
 
-    const [loopData, setLoopData] = useState<{ nr_wf: any[]; followup: any[]; nurture: any[]; owners: any[]; wa_activity: any[] } | null>(null);
-    const [loading, setLoading] = useState(true);
+    const initialKey = `wa-analytics:${subDays(new Date(), 7).toISOString().slice(0, 10)}:${new Date().toISOString().slice(0, 10)}`;
+    const cachedInitial = getCachedData<any>(initialKey);
+
+    const [loopData, setLoopData] = useState<{ nr_wf: any[]; followup: any[]; nurture: any[]; owners: any[]; wa_activity: any[] } | null>(() => cachedInitial);
+    const [loading, setLoading] = useState(!cachedInitial);
 
     const fetchData = useCallback(async (from: Date, to: Date) => {
-        setLoading(true);
         const fromISO = startOfDay(from).toISOString();
         const toISO = endOfDay(to).toISOString();
+        const currentKey = `wa-analytics:${fromISO.slice(0, 10)}:${toISO.slice(0, 10)}`;
+        if (!getCachedData(currentKey)) {
+            setLoading(true);
+        }
         try {
             const res = await fetch(`/api/whatsapp-leads?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`);
             if (res.ok) {
                 const data = await res.json();
                 setLoopData(data);
+                setCachedData(currentKey, data);
             }
         } catch (err) {
             console.error("[WA Analytics fetch]", err);
@@ -134,20 +142,40 @@ export default function WhatsappAnalyticsPage() {
         let totalReplies = 0;
 
         const dailyMap: Record<string, { reachouts: number; replies: number }> = {};
+        if (from && to) {
+            const cur = new Date(from);
+            while (cur.getTime() <= to) {
+                const dayKey = cur.toISOString().slice(0, 10);
+                dailyMap[dayKey] = { reachouts: 0, replies: 0 };
+                cur.setDate(cur.getDate() + 1);
+            }
+        }
+
         const statusCounts = { sent: 0, delivered: 0, read: 0, replied: 0, failed: 0 };
         const uniqueLeads = new Set<string>();
 
         mergedLeads.forEach(lead => {
-            const key = lead.recipient_address || lead.phone || lead.id;
-            if (key) uniqueLeads.add(key);
-
             const msgs: any[] = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
+            const inRangeMsgs = msgs.filter(m => {
+                const dt = m.sent_or_received_at || m.created_at;
+                if (!dt) return false;
+                const t = new Date(dt).getTime();
+                return !isNaN(t) && inRange(t);
+            });
 
-            if (msgs.length > 0) {
-                const outboundCount = msgs.filter(m => m.direction === 'OUTBOUND').length;
-                sentCount += outboundCount > 0 ? outboundCount : msgs.length;
+            let leadContactedInRange = false;
 
-                const hasInbound = msgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes';
+            if (inRangeMsgs.length > 0) {
+                const outbound = inRangeMsgs.filter(m => m.direction === 'OUTBOUND');
+                if (outbound.length > 0) {
+                    sentCount += outbound.length;
+                    leadContactedInRange = true;
+                } else {
+                    sentCount += inRangeMsgs.length;
+                    leadContactedInRange = true;
+                }
+
+                const hasInbound = inRangeMsgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes';
                 if (hasInbound) totalReplies++;
 
                 const stVal = String(lead.status || '').toLowerCase();
@@ -157,7 +185,7 @@ export default function WhatsappAnalyticsPage() {
                 else if (stVal.includes('failed') || stVal.includes('error')) statusCounts.failed++;
                 else statusCounts.sent++;
 
-                msgs.forEach(m => {
+                inRangeMsgs.forEach(m => {
                     const dt = m.sent_or_received_at || m.created_at;
                     if (dt) {
                         const dayKey = new Date(dt).toISOString().slice(0, 10);
@@ -167,8 +195,21 @@ export default function WhatsappAnalyticsPage() {
                     }
                 });
             } else {
-                sentCount += lead.whatsapp_count || 1;
-                if (lead.replied === 'yes') totalReplies++;
+                const leadDate = parseDate(lead["1st_wa_ts"] || lead.wp1_parsed_date || lead.created_at);
+                if (leadDate && inRange(leadDate.getTime())) {
+                    sentCount += lead.whatsapp_count || 1;
+                    leadContactedInRange = true;
+                    if (lead.replied === 'yes') totalReplies++;
+                    const dayKey = leadDate.toISOString().slice(0, 10);
+                    if (!dailyMap[dayKey]) dailyMap[dayKey] = { reachouts: 0, replies: 0 };
+                    dailyMap[dayKey].reachouts += lead.whatsapp_count || 1;
+                    if (lead.replied === 'yes') dailyMap[dayKey].replies++;
+                }
+            }
+
+            if (leadContactedInRange) {
+                const key = lead.recipient_address || lead.phone || lead.id;
+                if (key) uniqueLeads.add(key);
             }
         });
 
@@ -225,7 +266,7 @@ export default function WhatsappAnalyticsPage() {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <DateRangePicker onUpdate={({ range }) => setDateRange({ from: range?.from, to: range?.to })} />
+                    <DateRangePicker value={dateRange} onUpdate={({ range }) => setDateRange({ from: range?.from, to: range?.to })} />
                     <Button
                         variant="outline"
                         size="sm"

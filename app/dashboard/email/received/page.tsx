@@ -30,7 +30,7 @@ export default function ReceivedEmailsPage() {
     const [loadingApi, setLoadingApi] = useState(false);
     const [loopFilter, setLoopFilter] = useState("all");
     const [searchQuery, setSearchQuery] = useState("");
-    const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 90), to: new Date() });
+    const [dateRange, setDateRange] = useState<any>({ from: subDays(new Date(), 7), to: new Date() });
     const [sortBy, setSortBy] = useState("newest");
 
     useEffect(() => {
@@ -213,6 +213,7 @@ export default function ReceivedEmailsPage() {
                         />
                     </div>
                     <DateRangePicker
+                        value={dateRange}
                         className="w-full md:w-[260px]"
                         onUpdate={(values) => setDateRange(values.range)}
                     />

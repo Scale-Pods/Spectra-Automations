@@ -106,7 +106,7 @@ function ReadOnlyField({ label, value, isPassword }: { label: string, value: str
                     </span>
                     <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                         {isPassword && (
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-[var(--label-tertiary)] hover:text-[var(--label-primary)]" onClick={() => setShow(!show)}>
+                            <Button variant="ghost" size="icon" className="no-hover-shift h-6 w-6 text-[var(--label-tertiary)] hover:text-[var(--label-primary)]" onClick={() => setShow(!show)} aria-label="Toggle password visibility">
                                 {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                             </Button>
                         )}

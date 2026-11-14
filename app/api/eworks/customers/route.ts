@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { SPECTRA_EWORKS_CUSTOMERS } from '@/lib/eworks-data';
+import { getCachedData, setCachedData } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,14 @@ export async function GET(request: NextRequest) {
 
         const fromParam = searchParams.get('from') || searchParams.get('start_date');
         const toParam = searchParams.get('to') || searchParams.get('end_date');
+
+        const cacheKey = `eworks-api:${page}:${limit}:${search}:${category}:${fromParam || 'none'}:${toParam || 'none'}`;
+        const cached = getCachedData<any>(cacheKey);
+        if (cached) {
+            return NextResponse.json(cached, {
+                headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+            });
+        }
 
         let fromDate: Date | null = fromParam ? new Date(fromParam) : null;
         let toDate: Date | null = toParam ? new Date(toParam) : null;
@@ -279,7 +288,7 @@ export async function GET(request: NextRequest) {
             };
         });
 
-        return NextResponse.json({
+        const responsePayload = {
             customers: processedCustomers,
             pagination: {
                 total: filteredCustomers.length,
@@ -310,6 +319,12 @@ export async function GET(request: NextRequest) {
                 }
             },
             filterCounts
+        };
+
+        setCachedData(cacheKey, responsePayload);
+
+        return NextResponse.json(responsePayload, {
+            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
         });
 
     } catch (err: any) {

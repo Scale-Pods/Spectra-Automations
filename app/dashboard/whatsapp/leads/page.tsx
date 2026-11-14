@@ -117,7 +117,7 @@ export default function WhatsappLeadsPage() {
     const leadsPerPage = 10;
 
     const [dateRange, setDateRange] = useState<any>({
-        from: subDays(new Date(), 90),
+        from: subDays(new Date(), 7),
         to: new Date(),
     });
 
@@ -266,7 +266,7 @@ export default function WhatsappLeadsPage() {
                             RESET FILTERS
                         </Button>
                     )}
-                    <DateRangePicker onUpdate={({ range }) => setDateRange({ from: range?.from, to: range?.to })} />
+                    <DateRangePicker value={dateRange} onUpdate={({ range }) => setDateRange({ from: range?.from, to: range?.to })} />
                 </div>
             </div>
 

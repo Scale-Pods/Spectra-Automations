@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchMessages, groupMessagesByRecipient } from '@/lib/messages-data';
 import { supabaseAdmin } from '@/lib/supabase';
+import { getCachedData, setCachedData } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,18 +9,44 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const search = searchParams.get('search');
+        const fromParam = searchParams.get('from') || searchParams.get('start_date');
+        const toParam = searchParams.get('to') || searchParams.get('end_date');
 
-        // Query messages for WHATSAPP channel
-        const { messages } = await fetchMessages({
+        const fromDate = fromParam ? new Date(fromParam) : undefined;
+        const toDate = toParam ? new Date(toParam) : undefined;
+
+        const cacheKey = `wa-leads:${search || 'all'}:${fromDate?.toISOString() || 'none'}:${toDate?.toISOString() || 'none'}`;
+        const cached = getCachedData<any>(cacheKey);
+        if (cached) {
+            return NextResponse.json(cached, {
+                headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+            });
+        }
+
+        // Query messages for WHATSAPP channel with date range
+        const { messages: rawMessages } = await fetchMessages({
             channel: 'WHATSAPP',
             search: search || undefined,
-            limit: 500
+            from: fromDate,
+            to: toDate,
+            limit: 2000
         });
 
-        // Also query customers table to join customer data if available
+        const messages = rawMessages.filter(m => {
+            if (!fromDate && !toDate) return true;
+            const dt = m.sent_or_received_at || m.created_at;
+            if (!dt) return false;
+            const d = new Date(dt);
+            if (isNaN(d.getTime())) return false;
+            if (fromDate && d < fromDate) return false;
+            if (toDate && d > toDate) return false;
+            return true;
+        });
+
+        // Also query customers table to join customer data if available (select lean columns only)
         const { data: customerRows } = await supabaseAdmin
             .from('customers')
-            .select('*');
+            .select('id, full_name, customer_name, phone_e164, eworks_customer_id, email, city, address_line, total_job_count, total_invoiced_value, latest_quoted_service_category');
 
         const customersMap = new Map<string, any>();
         (customerRows || []).forEach(c => {
@@ -91,15 +118,19 @@ export async function GET(request: NextRequest) {
             }
         });
 
-        return NextResponse.json({
+        const responsePayload = {
             nr_wf,
             followup,
             nurture,
             owners: [],
             wa_activity,
             messages
-        }, {
-            headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        };
+
+        setCachedData(cacheKey, responsePayload);
+
+        return NextResponse.json(responsePayload, {
+            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
         });
     } catch (error: any) {
         console.error('Error in whatsapp-leads API route:', error);

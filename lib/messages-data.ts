@@ -340,6 +340,8 @@ export async function fetchMessages(options: {
     search?: string;
     limit?: number;
     offset?: number;
+    from?: string | Date;
+    to?: string | Date;
 } = {}): Promise<{ messages: SpectraMessageRow[]; total: number }> {
     try {
         let query = supabaseAdmin
@@ -348,6 +350,16 @@ export async function fetchMessages(options: {
 
         if (options.channel && options.channel !== 'all') {
             query = query.ilike('channel', options.channel);
+        }
+
+        if (options.from) {
+            const fromIso = options.from instanceof Date ? options.from.toISOString() : new Date(options.from).toISOString();
+            query = query.gte('sent_or_received_at', fromIso);
+        }
+
+        if (options.to) {
+            const toIso = options.to instanceof Date ? options.to.toISOString() : new Date(options.to).toISOString();
+            query = query.lte('sent_or_received_at', toIso);
         }
 
         if (options.search) {
@@ -374,6 +386,14 @@ export async function fetchMessages(options: {
                     (m.subject || '').toLowerCase().includes(s) ||
                     (m.body_text || '').toLowerCase().includes(s)
                 );
+            }
+            if (options.from) {
+                const fTime = new Date(options.from).getTime();
+                filtered = filtered.filter(m => new Date(m.sent_or_received_at || m.created_at).getTime() >= fTime);
+            }
+            if (options.to) {
+                const tTime = new Date(options.to).getTime();
+                filtered = filtered.filter(m => new Date(m.sent_or_received_at || m.created_at).getTime() <= tTime);
             }
             return {
                 messages: filtered,

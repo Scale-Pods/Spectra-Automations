@@ -100,7 +100,7 @@ function DashboardContent({
             mounted = false;
             clearInterval(iv);
         };
-    }, [pathname]);
+    }, []);
 
     const dashboardConfig = {
         master: {
