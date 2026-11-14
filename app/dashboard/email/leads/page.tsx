@@ -226,9 +226,26 @@ export default function UniqueEmailLeadsPage() {
         return filteredLeads.slice(start, start + ITEMS_PER_PAGE);
     }, [filteredLeads, currentPage]);
 
+    // Scope summary stats to the active dateRange filter
+    const dateScopedLeads = useMemo(() => {
+        if (!dateRange?.from) return uniqueLeads;
+        const from = new Date(dateRange.from);
+        from.setHours(0, 0, 0, 0);
+        const to = dateRange.to ? new Date(dateRange.to) : new Date(from);
+        to.setHours(23, 59, 59, 999);
+
+        return uniqueLeads.filter(lead => {
+            if (!lead.created_at) return true;
+            const d = new Date(lead.created_at);
+            if (isNaN(d.getTime())) return true;
+            return d >= from && d <= to;
+        });
+    }, [uniqueLeads, dateRange]);
+
     // Summary stats
-    const totalReplied = useMemo(() => uniqueLeads.filter(l => l.replied).length, [uniqueLeads]);
-    const overallReplyRate = uniqueLeads.length > 0 ? ((totalReplied / uniqueLeads.length) * 100).toFixed(1) : "0.0";
+    const totalUniqueCount = dateScopedLeads.length;
+    const totalReplied = useMemo(() => dateScopedLeads.filter(l => l.replied).length, [dateScopedLeads]);
+    const overallReplyRate = totalUniqueCount > 0 ? Math.min(100, (totalReplied / totalUniqueCount) * 100).toFixed(1) : "0.0";
 
     const loading = loadingLeads || loadingApi;
 
@@ -295,7 +312,7 @@ export default function UniqueEmailLeadsPage() {
                         <div>
                             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Unique Leads</p>
                             <h3 className="text-2xl font-extrabold text-slate-900 mt-0.5">
-                                {loading ? "..." : uniqueLeads.length.toLocaleString()}
+                                {loading ? "..." : totalUniqueCount.toLocaleString()}
                             </h3>
                             <p className="text-[11px] text-purple-600 mt-0.5 font-medium flex items-center gap-1">
                                 <Users className="h-3 w-3" /> Distinct Recipients

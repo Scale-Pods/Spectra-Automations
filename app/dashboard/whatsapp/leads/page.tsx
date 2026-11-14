@@ -135,13 +135,14 @@ export default function WhatsappLeadsPage() {
                 const owners = (data.owners || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Owners" }));
                 const waActivity = (data.wa_activity || []).map((a: any) => ({
                     ...a,
-                    source_loop: "Activity",
-                    "Name": a.lead_name || a.name || "Lead",
-                    "Phone": a.lead_phone || a.phone || "",
-                    "W.P_1": a.created_at || true,
-                    wp1_parsed_date: a.created_at,
-                    "WP_Replied_track": (a.replied_at || a.status === "completed" || a.status === "replied" || a.replied) ? "Replied" : "",
-                    status: a.status || "sent"
+                    source_loop: a.source_loop || "Activity",
+                    "Name": a["Name"] || a.full_name || a.lead_name || a.name || a.phone_e164 || a.Phone || a.recipient_address || "Lead",
+                    "Phone": a["Phone"] || a.phone || a.phone_e164 || a.lead_phone || a.recipient_address || "",
+                    "W.P_1": a["W.P_1"] || a.latest_body || "Outreach WhatsApp Message",
+                    wp1_parsed_date: a.wp1_parsed_date || a.latest_wp_date || a.latest_date || a.created_at,
+                    latest_wp_date: a.latest_wp_date || a.latest_date || a.created_at,
+                    "WP_Replied_track": (a.replied === "yes" || a.replied_at || a.status === "completed" || a.status === "replied" || a.whatsapp_replied === "yes") ? "Replied" : "",
+                    status: a.status || (a.replied === "yes" ? "replied" : "sent")
                 }));
                 const mergedRaw = [...nr_wf, ...followup, ...nurture, ...owners, ...waActivity];
                 const seen = new Set<string>();
@@ -192,9 +193,10 @@ export default function WhatsappLeadsPage() {
     const filteredLeads = useMemo(() => {
         setCurrentPage(1);
         return waLeads.filter(lead => {
-            // Strictly require non-empty value in WA_text column
-            const waText = lead.WA_text || lead["WA_text"] || lead["W.P_1"] || lead["whatsapp_1"];
-            if (!waText || !String(waText).trim()) return false;
+            const waText = lead.WA_text || lead["WA_text"] || lead["W.P_1"] || lead["whatsapp_1"] || lead.latest_body;
+            const hasWaContent = (waText && String(waText).trim() !== '' && String(waText).trim() !== 'null' && String(waText).trim() !== 'undefined') ||
+                (lead.messages && Array.isArray(lead.messages) && lead.messages.length > 0);
+            if (!hasWaContent) return false;
 
             const name = String(lead["Name"] || "").toLowerCase();
             const phone = String(lead["Phone"] || "");

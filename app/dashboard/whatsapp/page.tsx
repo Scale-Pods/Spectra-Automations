@@ -129,7 +129,7 @@ export default function WhatsappDashboardPage() {
                 let leadContactedInRange = false;
 
                 if (inRangeMsgs.length > 0) {
-                    const outbound = inRangeMsgs.filter(m => m.direction === 'OUTBOUND');
+                    const outbound = inRangeMsgs.filter(m => (m.direction || '').toUpperCase() === 'OUTBOUND');
                     if (outbound.length > 0) {
                         sentCount += outbound.length;
                         leadContactedInRange = true;
@@ -138,7 +138,7 @@ export default function WhatsappDashboardPage() {
                         leadContactedInRange = true;
                     }
 
-                    const hasInbound = inRangeMsgs.some(m => m.direction === 'INBOUND');
+                    const hasInbound = inRangeMsgs.some(m => (m.direction || '').toUpperCase() === 'INBOUND' || String(m.status || '').toLowerCase().includes('reply')) || lead.replied === 'yes';
                     if (hasInbound) totalReplies++;
 
                     inRangeMsgs.forEach(m => {
@@ -146,12 +146,12 @@ export default function WhatsappDashboardPage() {
                         if (dt) {
                             const dayKey = new Date(dt).toISOString().slice(0, 10);
                             if (!dailyMap[dayKey]) dailyMap[dayKey] = { sent: 0, replied: 0 };
-                            if (m.direction === 'OUTBOUND') dailyMap[dayKey].sent++;
-                            if (m.direction === 'INBOUND') dailyMap[dayKey].replied++;
+                            if ((m.direction || '').toUpperCase() === 'OUTBOUND') dailyMap[dayKey].sent++;
+                            if ((m.direction || '').toUpperCase() === 'INBOUND') dailyMap[dayKey].replied++;
                         }
                     });
                 } else {
-                    const leadDate = parseDate(lead["1st_wa_ts"] || lead.wp1_parsed_date || lead.created_at);
+                    const leadDate = parseDate(lead.latest_date || lead.latest_wp_date || lead["1st_wa_ts"] || lead.wp1_parsed_date || lead.sent_or_received_at || lead.created_at);
                     if (leadDate && inRange(leadDate.getTime())) {
                         sentCount += lead.whatsapp_count || 1;
                         leadContactedInRange = true;

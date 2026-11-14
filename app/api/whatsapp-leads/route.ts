@@ -64,9 +64,14 @@ export async function GET(request: NextRequest) {
         const wa_activity: any[] = [];
 
         leadSummaries.forEach(lead => {
-            const matchedCust = lead.customer_id ? customersMap.get(lead.customer_id) : (lead.eworks_customer_id ? customersMap.get(String(lead.eworks_customer_id)) : null);
+            const rawPhoneClean = String(lead.recipient_address || lead.lead_phone || '').replace(/\D/g, '');
+            const matchedCust = lead.customer_id 
+                ? customersMap.get(lead.customer_id) 
+                : (lead.eworks_customer_id 
+                    ? customersMap.get(String(lead.eworks_customer_id)) 
+                    : (rawPhoneClean ? customersMap.get(rawPhoneClean) : null));
             
-            const isReplied = lead.direction === 'INBOUND' || lead.messages.some(m => m.direction === 'INBOUND');
+            const isReplied = lead.direction === 'INBOUND' || lead.messages.some(m => (m.direction || '').toUpperCase() === 'INBOUND');
             const createdIso = lead.latest_date || new Date().toISOString();
 
             const msgCustomerId = lead.customer_id || lead.messages.find(m => m.customer_id)?.customer_id || matchedCust?.id || null;
@@ -78,9 +83,9 @@ export async function GET(request: NextRequest) {
                 conversation_id: lead.conversation_id,
                 eworks_customer_id: lead.eworks_customer_id || matchedCust?.eworks_customer_id || null,
                 recipient_address: lead.recipient_address, // Unique constraint
-                Name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
-                name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
-                full_name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name,
+                Name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name || lead.recipient_address,
+                name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name || lead.recipient_address,
+                full_name: matchedCust?.full_name || matchedCust?.customer_name || lead.lead_name || lead.recipient_address,
                 Phone: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
                 phone: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
                 phone_e164: lead.lead_phone || matchedCust?.phone_e164 || lead.recipient_address,
@@ -93,6 +98,11 @@ export async function GET(request: NextRequest) {
                 "W.P_3": lead.messages[2]?.body_text || "",
                 "1st_wa_ts": createdIso,
                 wp1_parsed_date: createdIso,
+                latest_date: createdIso,
+                latest_wp_date: createdIso,
+                created_at: createdIso,
+                sent_or_received_at: createdIso,
+                updated_at: createdIso,
                 WP_Replied_track: isReplied ? "Replied" : "",
                 replied: isReplied ? "yes" : "no",
                 whatsapp_replied: isReplied ? "yes" : "",

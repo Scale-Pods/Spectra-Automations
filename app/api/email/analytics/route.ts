@@ -30,9 +30,48 @@ export async function GET(request: Request) {
                 p_from: fromDate.toISOString(),
                 p_to: toDate.toISOString()
             });
-            if (!rpcError && rpcData && typeof rpcData === 'object' && 'totalEmailSent' in rpcData) {
-                setCachedData(cacheKey, rpcData);
-                return NextResponse.json(rpcData, {
+            if (!rpcError && rpcData && typeof rpcData === 'object' && ('totalEmailSent' in rpcData || 'totalSent' in rpcData)) {
+                const rpcReplies = Number(rpcData.totalLeadReplies || rpcData.totalReplies || 0);
+                let rpcUnique = Number(rpcData.totalUniqueLeadContacted || rpcData.uniqueLeadsContacted || 0);
+                
+                // If RPC computed only outbound-only unique leads, normalize to true distinct prospects
+                if (rpcUnique < rpcReplies) {
+                    const { data: distinctMsgs } = await supabaseAdmin
+                        .from('messages')
+                        .select('sender_address, recipient_address, direction, status')
+                        .ilike('channel', 'EMAIL')
+                        .gte('sent_or_received_at', fromDate.toISOString())
+                        .lte('sent_or_received_at', toDate.toISOString());
+
+                    const distinctSet = new Set<string>();
+                    (distinctMsgs || []).forEach((m: any) => {
+                        const isRep = (m.direction || '').toUpperCase() === 'INBOUND' || (m.status || '').toLowerCase().includes('reply');
+                        const addr = isRep ? m.sender_address : m.recipient_address;
+                        if (addr && String(addr).trim()) distinctSet.add(String(addr).trim().toLowerCase());
+                    });
+                    if (distinctSet.size > 0) {
+                        rpcUnique = distinctSet.size;
+                    } else {
+                        rpcUnique = rpcReplies;
+                    }
+                }
+
+                const finalReplies = Math.min(rpcReplies, rpcUnique);
+                const sanitizedReplyRate = rpcUnique > 0
+                    ? Math.min(100, (finalReplies / rpcUnique) * 100).toFixed(1)
+                    : "0.0";
+
+                const sanitizedPayload = {
+                    ...rpcData,
+                    totalUniqueLeadContacted: rpcUnique,
+                    uniqueLeadsContacted: rpcUnique,
+                    totalLeadReplies: finalReplies,
+                    replyRate: sanitizedReplyRate,
+                    responseRate: sanitizedReplyRate
+                };
+
+                setCachedData(cacheKey, sanitizedPayload);
+                return NextResponse.json(sanitizedPayload, {
                     headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
                 });
             }
@@ -66,6 +105,7 @@ export async function GET(request: Request) {
         let totalUnsubscribed = 0;
         const contactedLeads = new Set<string>();
         const repliedLeads = new Set<string>();
+        const allUniqueLeads = new Set<string>();
         const contactedWhoReplied = new Set<string>();
 
         // Initialize dailyMap for every day in the selected interval
@@ -89,8 +129,13 @@ export async function GET(request: Request) {
                 dailyMap[dateKey] = { date: dateKey, sent: 0, replies: 0 };
             }
 
-            const isReply = m.direction === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
-            const leadKey = m.customer_id || (isReply ? m.sender_address : m.recipient_address);
+            const isReply = (m.direction || '').toUpperCase() === 'INBOUND' || (m.status && m.status.toLowerCase().includes('reply'));
+            const prospectAddress = isReply ? m.sender_address : m.recipient_address;
+            const leadKey = (prospectAddress || m.customer_id || '').toLowerCase().trim();
+
+            if (leadKey) {
+                allUniqueLeads.add(leadKey);
+            }
 
             if (isReply) {
                 totalReplies++;
@@ -151,10 +196,8 @@ export async function GET(request: Request) {
             });
         }
 
-        const totalUniqueLeadContacted = contactedLeads.size;
-        const totalLeadReplies = contactedWhoReplied.size > 0
-            ? contactedWhoReplied.size
-            : Math.min(repliedLeads.size, totalUniqueLeadContacted || repliedLeads.size);
+        const totalUniqueLeadContacted = Math.max(allUniqueLeads.size, contactedLeads.size, repliedLeads.size);
+        const totalLeadReplies = Math.min(repliedLeads.size, totalUniqueLeadContacted);
         const replyRate = totalUniqueLeadContacted > 0
             ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1)
             : "0.0";

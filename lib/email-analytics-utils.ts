@@ -261,8 +261,10 @@ export function calculateEmailMetrics(
     });
 
     const dailyChartData = Object.values(dailyMap);
-    const calculatedResponseRate = totalUniqueLeadContacted > 0
-        ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1)
+    const finalUnique = Math.max(totalUniqueLeadContacted, totalLeadReplies);
+    const finalReplies = Math.min(totalLeadReplies, finalUnique);
+    const calculatedResponseRate = finalUnique > 0
+        ? Math.min(100, (finalReplies / finalUnique) * 100).toFixed(1)
         : "0.0";
     const unsubRate = totalEmails > 0 ? ((unsubscribedCount / totalEmails) * 100).toFixed(1) : "0.0";
 
@@ -270,8 +272,8 @@ export function calculateEmailMetrics(
         totalEmails,
         totalSent: totalEmails,
         totalEmailSent: totalEmails,
-        totalUniqueLeadContacted,
-        totalLeadReplies,
+        totalUniqueLeadContacted: finalUnique,
+        totalLeadReplies: finalReplies,
         firstEmailCount,
         replyCount,
         totalReplies: replyCount,

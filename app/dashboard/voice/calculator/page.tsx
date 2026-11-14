@@ -208,8 +208,8 @@ export default function VoiceCalculatorPage() {
                     )}
 
                     {calculating && (
-                        <Card className="border-[var(--separator)] bg-[var(--glass-fill)] h-[400px] flex flex-col items-center justify-center text-center p-8">
-                            <LMLoader />
+                        <Card className="border-[var(--separator)] bg-[var(--glass-fill)] h-[400px] flex flex-col items-center justify-center text-center p-8 relative overflow-hidden">
+                            <LMLoader contained />
                             <h3 className="text-lg font-bold text-[var(--label-primary)] mt-6">Processing Voice Logs</h3>
                             <p className="text-[var(--label-secondary)] max-w-xs mt-2 animate-pulse">
                                 Fetching call records and applying telephony rates...

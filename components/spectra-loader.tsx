@@ -5,11 +5,20 @@ import Image from "next/image";
 
 interface SpectraLoaderProps {
     fullScreen?: boolean;
+    contained?: boolean;
+    className?: string;
 }
 
-export const SpectraLoader = ({ fullScreen = false }: SpectraLoaderProps) => {
+export const SpectraLoader = ({ fullScreen = false, contained = false, className = "" }: SpectraLoaderProps) => {
+    let positionClasses = "fixed top-14 lg:top-[60px] left-0 md:left-64 right-0 bottom-0";
+    if (fullScreen) {
+        positionClasses = "fixed inset-0";
+    } else if (contained) {
+        positionClasses = "absolute inset-0 min-h-[300px]";
+    }
+
     return (
-        <div className={`${fullScreen ? 'fixed inset-0' : 'absolute inset-0 min-h-[400px]'} z-[100] flex items-center justify-center bg-[#F8FAFC]/85 backdrop-blur-md transition-all duration-500`}>
+        <div className={`${positionClasses} z-[100] flex items-center justify-center bg-[#F8FAFC]/85 backdrop-blur-md transition-all duration-500 ${className}`}>
             <div className="relative flex flex-col items-center justify-center">
 
                 {/* Animated Background Glow */}

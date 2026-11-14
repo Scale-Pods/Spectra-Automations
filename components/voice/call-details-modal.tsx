@@ -304,7 +304,7 @@ export function CallDetailsModal({ open, onOpenChange, call }: CallDetailsModalP
                 <div className="flex-1 overflow-auto relative">
                     {localLoading && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-[var(--glass-fill)]/80 backdrop-blur-[1px]">
-                            <LMLoader fullScreen={false} />
+                            <LMLoader contained />
                         </div>
                     )}
                     {/* Call Overview */}

@@ -300,26 +300,28 @@ export default function WhatsappChatPage() {
             const owners = (data.owners || []).map((l: any) => ({ ...l, source_loop: l.source_loop || "Owners" }));
             const waActivity = (data.wa_activity || []).map((a: any) => ({
                 ...a,
-                source_loop: "Activity",
-                "Name": a.lead_name || a.name || "Lead",
-                "Phone": a.lead_phone || a.phone || "",
-                "W.P_1": a.created_at || true,
-                wp1_parsed_date: a.created_at,
-                "WP_Replied_track": (a.replied_at || a.status === "completed" || a.status === "replied" || a.replied) ? "Replied" : "",
-                status: a.status || "sent"
+                source_loop: a.source_loop || "Activity",
+                "Name": a["Name"] || a.full_name || a.lead_name || a.name || a.phone_e164 || a.Phone || a.recipient_address || "Lead",
+                "Phone": a["Phone"] || a.phone || a.phone_e164 || a.lead_phone || a.recipient_address || "",
+                "W.P_1": a["W.P_1"] || a.latest_body || "Outreach WhatsApp Message",
+                wp1_parsed_date: a.wp1_parsed_date || a.latest_wp_date || a.latest_date || a.created_at,
+                latest_wp_date: a.latest_wp_date || a.latest_date || a.created_at,
+                "WP_Replied_track": (a.replied === "yes" || a.replied_at || a.status === "completed" || a.status === "replied" || a.whatsapp_replied === "yes" || isTrueWpReply(a)) ? "Replied" : "",
+                status: a.status || (a.replied === "yes" ? "replied" : "sent")
             }));
             const mergedRaw = [...nr_wf, ...followup, ...waActivity];
             const seen = new Set<string>();
             const mergedLeads: any[] = [];
             mergedRaw.forEach((l: any) => {
-                const waText = l.WA_text || l["W.P_1"] || l.whatsapp_1;
+                const waText = l.WA_text || l["W.P_1"] || l.whatsapp_1 || l.latest_body;
                 const hasWaText = (waText && String(waText).trim() !== '' && String(waText).trim() !== 'null' && String(waText).trim() !== 'undefined') ||
-                    !!(l.whatsapp_2 || l.whatsapp_3 || l.whatsapp_4 || l["W.P_2"] || l["W.P_3"] || isTrueWpReply(l));
+                    !!(l.whatsapp_2 || l.whatsapp_3 || l.whatsapp_4 || l["W.P_2"] || l["W.P_3"] || isTrueWpReply(l)) ||
+                    (l.messages && Array.isArray(l.messages) && l.messages.length > 0);
                 
                 if (!hasWaText) return;
 
-                const phoneClean = String(l.phone_e164 || l.phone || l.Phone || '').replace(/\D/g, '');
-                const key = phoneClean.length >= 7 ? phoneClean : String(l.id || l["Lead ID"] || Math.random());
+                const phoneClean = String(l.phone_e164 || l.phone || l.Phone || l.recipient_address || '').replace(/\D/g, '');
+                const key = phoneClean.length >= 7 ? phoneClean : String(l.id || l["Lead ID"] || l.recipient_address || Math.random());
                 if (!seen.has(key)) {
                     seen.add(key);
                     mergedLeads.push(l);
@@ -409,8 +411,12 @@ export default function WhatsappChatPage() {
         const from = startOfDay(new Date(dateRange.from)).getTime();
         const to = endOfDay(new Date(dateRange?.to || dateRange?.from)).getTime();
         return leads.filter(lead => {
-            const d = getWpLeadDate(lead) || getLeadLatestActivity(lead);
-            if (!d || isNaN(d.getTime()) || d.getTime() === 0) return false;
+            const rawDate = getWpLeadDate(lead);
+            const d = (rawDate && rawDate.getTime() > 0) ? rawDate : getLeadLatestActivity(lead);
+            if (!d || isNaN(d.getTime()) || d.getTime() === 0) {
+                // If specific date could not be parsed, keep the lead because the backend API already scoped the query to the date range
+                return true;
+            }
             const t = d.getTime();
             return t >= from && t <= to;
         });
@@ -419,9 +425,10 @@ export default function WhatsappChatPage() {
     const filteredLeads = useMemo(() => {
         return leadsInRange.filter(l => {
             const lead = l as any;
-            const waText = lead.WA_text || lead["W.P_1"] || lead.whatsapp_1;
+            const waText = lead.WA_text || lead["W.P_1"] || lead.whatsapp_1 || lead.latest_body;
             const hasWaContent = (waText && String(waText).trim() !== '' && String(waText).trim() !== 'null' && String(waText).trim() !== 'undefined') ||
-                !!(lead.whatsapp_2 || lead.whatsapp_3 || lead.whatsapp_4 || lead["W.P_2"] || lead["W.P_3"] || isTrueWpReply(lead));
+                !!(lead.whatsapp_2 || lead.whatsapp_3 || lead.whatsapp_4 || lead["W.P_2"] || lead["W.P_3"] || isTrueWpReply(lead)) ||
+                (lead.messages && Array.isArray(lead.messages) && lead.messages.length > 0);
             if (!hasWaContent) return false;
 
             // WA endpoint returns "Name" / "Phone" (uppercase keys from DB columns)
@@ -489,12 +496,12 @@ export default function WhatsappChatPage() {
             // Sort by latest_wp_date from server (most recent in-range message date).
             // Falls back to wp1_parsed_date then Created At.
             const getDate = (l: any) => {
-                const raw = l.latest_wp_date || l.wp1_parsed_date || l["Created At"] || l.created_at;
+                const raw = l.latest_wp_date || l.latest_date || l.wp1_parsed_date || l.sent_or_received_at || l["Created At"] || l.created_at;
                 return raw ? new Date(raw).getTime() : 0;
             };
             return getDate(b) - getDate(a);
         });
-    }, [leads, searchQuery, activeFilters, dateRange]);
+    }, [leadsInRange, searchQuery, activeFilters]);
 
     // Owner filtering — waOwners already pre-filtered by Whatsapp_1_Date on the server
     const filteredOwners = useMemo(() => {
@@ -561,10 +568,10 @@ export default function WhatsappChatPage() {
             const msgs: any[] = lead.messages && Array.isArray(lead.messages) ? lead.messages : [];
             
             if (msgs.length > 0) {
-                const outbound = msgs.filter(m => m.direction === 'OUTBOUND').length;
+                const outbound = msgs.filter(m => (m.direction || '').toUpperCase() === 'OUTBOUND').length;
                 sentCount += outbound > 0 ? outbound : msgs.length;
                 
-                const hasInbound = msgs.some(m => m.direction === 'INBOUND') || lead.replied === 'yes' || lead.whatsapp_replied === 'yes';
+                const hasInbound = msgs.some(m => (m.direction || '').toUpperCase() === 'INBOUND' || String(m.status || '').toLowerCase().includes('reply')) || lead.replied === 'yes' || lead.whatsapp_replied === 'yes' || isTrueWpReply(lead);
                 if (hasInbound) repliedCount++;
                 
                 const hasFailed = msgs.some(m => String(m.status || '').toLowerCase().includes('failed') || String(m.status || '').toLowerCase().includes('error')) ||
@@ -930,11 +937,11 @@ function getStatusBadge(statusRaw?: string) {
 
 function CustomerRow({ lead: leadRaw, onClick }: { lead: any; onClick: () => void }) {
     const lead = leadRaw as any;
-    const latestWpRaw = lead.latest_wp_date || lead.wp1_parsed_date;
+    const latestWpRaw = lead.latest_wp_date || lead.latest_date || lead.wp1_parsed_date || lead.sent_or_received_at;
     const createdRaw = lead["Created At"] || lead.created_at;
     const latestDate = latestWpRaw ? new Date(latestWpRaw) : (createdRaw ? new Date(createdRaw) : new Date(0));
-    const displayName = lead["Name"] || lead.name || "—";
-    const displayPhone = lead["Phone"] || lead.phone || "—";
+    const displayName = lead["Name"] || lead.name || lead.full_name || lead.lead_name || lead.phone || lead.recipient_address || "—";
+    const displayPhone = lead["Phone"] || lead.phone || lead.phone_e164 || lead.lead_phone || lead.recipient_address || "—";
 
     let sentCount = 0;
 

@@ -57,10 +57,22 @@ BEGIN
         COUNT(DISTINCT COALESCE(customer_id::TEXT, sender_address)) FILTER (WHERE UPPER(channel) = 'WHATSAPP' AND (UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')),
         COUNT(*) FILTER (WHERE UPPER(channel) = 'VOICE'),
         COUNT(*) FILTER (WHERE UPPER(channel) = 'SMS'),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, recipient_address)) FILTER (WHERE UPPER(channel) = 'EMAIL' AND UPPER(direction) = 'OUTBOUND'),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, sender_address)) FILTER (WHERE UPPER(channel) = 'EMAIL' AND (UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, recipient_address)) FILTER (WHERE UPPER(direction) = 'OUTBOUND'),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, sender_address)) FILTER (WHERE UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            CASE WHEN UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%' THEN sender_address ELSE recipient_address END
+        ))) FILTER (WHERE UPPER(channel) = 'EMAIL'),
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            sender_address
+        ))) FILTER (WHERE UPPER(channel) = 'EMAIL' AND (UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')),
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            CASE WHEN UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%' THEN sender_address ELSE recipient_address END
+        ))),
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            sender_address
+        ))) FILTER (WHERE UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')
     INTO 
         v_activity_email_count,
         v_activity_wa_count,
@@ -78,11 +90,11 @@ BEGIN
 
     -- Calculate reply rates
     IF v_email_unique_leads > 0 THEN
-        v_email_reply_rate := TO_CHAR(ROUND((v_email_replies::NUMERIC / v_email_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
+        v_email_reply_rate := TO_CHAR(ROUND((LEAST(v_email_replies::NUMERIC, v_email_unique_leads::NUMERIC) / v_email_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
     END IF;
 
     IF v_total_unique_leads > 0 THEN
-        v_overall_reply_rate := TO_CHAR(ROUND((v_total_lead_replies::NUMERIC / v_total_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
+        v_overall_reply_rate := TO_CHAR(ROUND((LEAST(v_total_lead_replies::NUMERIC, v_total_unique_leads::NUMERIC) / v_total_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
     END IF;
 
     -- eWorks aggregate values
@@ -175,8 +187,14 @@ DECLARE
 BEGIN
     SELECT 
         COUNT(*) FILTER (WHERE UPPER(direction) = 'OUTBOUND'),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, recipient_address)) FILTER (WHERE UPPER(direction) = 'OUTBOUND'),
-        COUNT(DISTINCT COALESCE(customer_id::TEXT, sender_address)) FILTER (WHERE UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            CASE WHEN UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%' THEN sender_address ELSE recipient_address END
+        ))),
+        COUNT(DISTINCT LOWER(COALESCE(
+            NULLIF(customer_id::TEXT, ''),
+            sender_address
+        ))) FILTER (WHERE UPPER(direction) = 'INBOUND' OR LOWER(status) LIKE '%reply%')
     INTO 
         v_total_sent,
         v_total_unique_leads,
@@ -186,7 +204,7 @@ BEGIN
       AND COALESCE(sent_or_received_at, created_at) BETWEEN p_from AND p_to;
 
     IF v_total_unique_leads > 0 THEN
-        v_reply_rate := TO_CHAR(ROUND((v_total_replies::NUMERIC / v_total_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
+        v_reply_rate := TO_CHAR(ROUND((LEAST(v_total_replies::NUMERIC, v_total_unique_leads::NUMERIC) / v_total_unique_leads::NUMERIC) * 100, 1), 'FM990.0');
     END IF;
 
     -- Daily breakdown

@@ -83,9 +83,15 @@ export default function EmailDashboardPage() {
 
     const metrics = useMemo(() => {
         const totalEmailSent = apiAnalytics?.totalEmailSent ?? apiAnalytics?.totalSent ?? calculatedMetrics.totalEmailSent ?? calculatedMetrics.totalSent ?? 0;
-        const totalUniqueLeadContacted = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 0;
-        const totalLeadReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 0;
-        const replyRate = apiAnalytics?.replyRate ?? (totalUniqueLeadContacted > 0 ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1) : "0.0");
+        const rawUnique = apiAnalytics?.totalUniqueLeadContacted ?? calculatedMetrics.totalUniqueLeadContacted ?? 0;
+        const rawReplies = apiAnalytics?.totalLeadReplies ?? calculatedMetrics.totalLeadReplies ?? 0;
+        
+        // Ensure totalUniqueLeadContacted reflects all engaged prospects and is at least totalLeadReplies
+        const totalUniqueLeadContacted = Math.max(rawUnique, rawReplies);
+        const totalLeadReplies = Math.min(rawReplies, totalUniqueLeadContacted);
+        const replyRate = totalUniqueLeadContacted > 0 
+            ? Math.min(100, (totalLeadReplies / totalUniqueLeadContacted) * 100).toFixed(1) 
+            : "0.0";
         
         const dailyChartData = (apiAnalytics?.dailyHistory && apiAnalytics.dailyHistory.length > 0)
             ? apiAnalytics.dailyHistory

@@ -190,20 +190,47 @@ export function isTrueWpReply(lead: any): boolean {
 export function getWpLeadDate(lead: any): Date {
     if (!lead) return new Date(0);
 
-    // 1. Reply date if replied
-    const replyDate = extractReplyDate(lead);
-    if (replyDate && !isNaN(replyDate.getTime())) return replyDate;
+    // 1. If lead has messages array, get latest message timestamp
+    if (lead.messages && Array.isArray(lead.messages) && lead.messages.length > 0) {
+        for (let i = lead.messages.length - 1; i >= 0; i--) {
+            const m = lead.messages[i];
+            const dt = m.sent_or_received_at || m.created_at;
+            if (dt) {
+                const d = new Date(dt);
+                if (!isNaN(d.getTime()) && d.getTime() > 0) return d;
+            }
+        }
+    }
 
-    // 2. W.P_1 date timestamp or last message timestamp
+    // 2. Direct date fields on the lead summary
+    const directFields = [
+        lead.latest_wp_date,
+        lead.latest_date,
+        lead.wp1_parsed_date,
+        lead["1st_wa_ts"],
+        lead.sent_or_received_at,
+        lead.replied_at,
+    ];
+    for (const f of directFields) {
+        if (!f) continue;
+        const d = parseMsgDate(f) || new Date(f);
+        if (d && !isNaN(d.getTime()) && d.getTime() > 0) return d;
+    }
+
+    // 3. Reply date if replied
+    const replyDate = extractReplyDate(lead);
+    if (replyDate && !isNaN(replyDate.getTime()) && replyDate.getTime() > 0) return replyDate;
+
+    // 4. W.P_1 date timestamp or last message timestamp
     for (let i = 10; i >= 1; i--) {
         const val = lead[`W.P_${i}`] || lead[`W.P_${i}_date`];
         if (val) {
             const d = parseMsgDate(val);
-            if (d) return d;
+            if (d && !isNaN(d.getTime()) && d.getTime() > 0) return d;
         }
     }
 
-    // 3. Fallback to updated_at / created_at / last_activity_at / Date / Created At / Date Added
+    // 5. Fallback to updated_at / created_at / last_activity_at / Date / Created At / Date Added
     const dateFields = [
         lead.updated_at,
         lead.created_at,
@@ -216,7 +243,7 @@ export function getWpLeadDate(lead: any): Date {
     for (const field of dateFields) {
         if (!field) continue;
         const d = parseMsgDate(field) || new Date(field);
-        if (d && !isNaN(d.getTime())) return d;
+        if (d && !isNaN(d.getTime()) && d.getTime() > 0) return d;
     }
 
     return new Date(0);
