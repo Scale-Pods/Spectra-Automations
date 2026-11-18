@@ -14,9 +14,17 @@ import {
     FileText,
     RefreshCw,
     Check,
-    Receipt
+    Receipt,
+    ShieldCheck,
+    AlertCircle,
+    Info,
+    Calendar,
+    X,
 } from "lucide-react";
 import { format } from "date-fns";
+import { executeApprovalAction, AUTHORIZED_REVIEWER_EMAILS, ApprovalActionResult } from "@/lib/approvals-client";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export const APPROVAL_STATUS_META: Record<string, { label: string; short: string; color: string; step: number }> = {
     SPECTRA_REVIEW_REQUIRED: {
@@ -106,18 +114,62 @@ interface ApprovalDetailModalProps {
     approval: any | null;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onActionCompleted?: () => void;
 }
 
 export function ApprovalDetailModal({
     approval,
     open,
     onOpenChange,
+    onActionCompleted,
 }: ApprovalDetailModalProps) {
     const [messages, setMessages] = useState<any[]>([]);
     const [loadingMessages, setLoadingMessages] = useState<boolean>(false);
 
+    // Interactive Action State
+    const [modalPrice, setModalPrice] = useState<string>("");
+    const [modalSchedule, setModalSchedule] = useState<string>("");
+    const [modalNotes, setNotes] = useState<string>("");
+    const [modalReviewer, setModalReviewer] = useState<string>("marketing@spectradubai.com");
+    const [rejectReason, setRejectReason] = useState<string>("Property located outside designated service community.");
+    const [showRejectInput, setShowRejectInput] = useState<boolean>(false);
+    const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+    const [modalFeedback, setModalFeedback] = useState<{
+        type: "success" | "info" | "error";
+        message: string;
+    } | null>(null);
+
     useEffect(() => {
         if (!approval || !open) return;
+
+        // Autofill state
+        const initialP = Number(
+            approval.total_aed ??
+            approval.approved_total ??
+            approval.resolved_proposed_total ??
+            0
+        ).toFixed(2);
+        setModalPrice(initialP);
+
+        const initialSched =
+            approval.requested_timing ||
+            approval.proposal_payload?.preferred_timing ||
+            approval.approved_payload?.timing ||
+            "Tomorrow at 4:00 PM";
+        setModalSchedule(initialSched);
+
+        const isDispatch =
+            approval.status === "JOB_AUTHORIZATION_PENDING" ||
+            approval.status === "CUSTOMER_ACCEPTED";
+
+        setModalReviewer(isDispatch ? "dispatch@spectradubai.com" : "marketing@spectradubai.com");
+        setNotes(
+            isDispatch
+                ? "Confirmed schedule with customer. Central dispatch handling technician assignment."
+                : "Approved via Spectra Operations Portal"
+        );
+        setShowRejectInput(false);
+        setModalFeedback(null);
 
         if (approval.conversation_id || approval.customer_id) {
             setLoadingMessages(true);
@@ -136,6 +188,77 @@ export function ApprovalDetailModal({
             setMessages([]);
         }
     }, [approval, open]);
+
+    const handleModalAction = async (actionType: string, customPayload: Record<string, any> = {}) => {
+        if (!approval) return;
+        setSubmittingAction(actionType);
+        setModalFeedback(null);
+
+        const isDispatch =
+            approval.status === "JOB_AUTHORIZATION_PENDING" ||
+            approval.status === "CUSTOMER_ACCEPTED";
+
+        const token = isDispatch
+            ? approval.job_auth_token || approval.job_auth_id || `SPECTRA-JOB-AUTH-${approval.approval_id?.replace("SPECTRA-APPROVAL-", "")}`
+            : approval.approval_id;
+
+        const payload = {
+            action: actionType as any,
+            token,
+            reviewer_email: modalReviewer,
+            ...customPayload,
+        };
+
+        try {
+            const res: ApprovalActionResult = await executeApprovalAction(payload);
+            if (res.action_executed === "NO_OP_ALREADY_PROCESSED") {
+                setModalFeedback({
+                    type: "info",
+                    message: "Notice: This proposal was already approved via Email/Frontend.",
+                });
+            } else if (res.success) {
+                if (actionType === "AUTHORIZE_JOB" && res.job_id) {
+                    setModalFeedback({
+                        type: "success",
+                        message: `eWorks Job #${res.job_id} successfully created & dispatched!`,
+                    });
+                } else if (actionType === "APPROVE_QUOTE" || actionType === "APPROVE") {
+                    setModalFeedback({
+                        type: "success",
+                        message: "Quote approved! Outbound proposal sent to customer on WhatsApp/Email.",
+                    });
+                } else if (actionType === "REVISE_QUOTE") {
+                    setModalFeedback({
+                        type: "success",
+                        message: `Price revised to AED ${Number(modalPrice).toFixed(2)}.`,
+                    });
+                } else {
+                    setModalFeedback({
+                        type: "success",
+                        message: "Action completed successfully.",
+                    });
+                }
+            } else {
+                setModalFeedback({
+                    type: "error",
+                    message: res.error || "Failed to process approval action.",
+                });
+            }
+
+            if (onActionCompleted) {
+                setTimeout(() => {
+                    onActionCompleted();
+                }, 1600);
+            }
+        } catch (err: any) {
+            setModalFeedback({
+                type: "error",
+                message: `Network error: ${err.message}`,
+            });
+        } finally {
+            setSubmittingAction(null);
+        }
+    };
 
     if (!approval) return null;
 
@@ -403,6 +526,146 @@ export function ApprovalDetailModal({
                             )}
                         </CardContent>
                     </Card>
+
+                    {/* Feedback Toast Notice */}
+                    {modalFeedback && (
+                        <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                            modalFeedback.type === "success"
+                                ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                                : modalFeedback.type === "info"
+                                ? "bg-blue-50 border-blue-300 text-blue-900"
+                                : "bg-rose-50 border-rose-300 text-rose-900"
+                        }`}>
+                            {modalFeedback.type === "success" && <Check className="h-4 w-4 text-emerald-600 shrink-0" />}
+                            {modalFeedback.type === "info" && <Info className="h-4 w-4 text-blue-600 shrink-0" />}
+                            {modalFeedback.type === "error" && <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />}
+                            <span className="font-bold">{modalFeedback.message}</span>
+                        </div>
+                    )}
+
+                    {/* Interactive Action Bar (Gate 1: Review Required) */}
+                    {approval.status === "SPECTRA_REVIEW_REQUIRED" && (
+                        <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-300 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-900">
+                                    <ShieldCheck className="h-4 w-4 text-amber-600" />
+                                    <span>Execute Commercial Quotation Review</span>
+                                </div>
+                                <span className="text-[11px] text-slate-500 font-medium">Reviewer: {modalReviewer}</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                        Approved Price (AED incl. VAT):
+                                    </label>
+                                    <Input
+                                        type="number"
+                                        step="0.01"
+                                        value={modalPrice}
+                                        onChange={(e) => setModalPrice(e.target.value)}
+                                        className="h-8 text-xs font-bold font-mono bg-white border-amber-300"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                                        Schedule Window:
+                                    </label>
+                                    <Input
+                                        type="text"
+                                        value={modalSchedule}
+                                        onChange={(e) => setModalSchedule(e.target.value)}
+                                        className="h-8 text-xs bg-white border-amber-300"
+                                    />
+                                </div>
+                            </div>
+
+                            {showRejectInput && (
+                                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 space-y-2">
+                                    <label className="text-[11px] font-bold text-rose-900 block">Rejection Reason:</label>
+                                    <Input
+                                        value={rejectReason}
+                                        onChange={(e) => setRejectReason(e.target.value)}
+                                        className="h-8 text-xs bg-white border-rose-300"
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowRejectInput(false)}>Cancel</Button>
+                                        <Button
+                                            size="sm"
+                                            className="h-7 text-xs bg-rose-700 hover:bg-rose-800 text-white font-bold"
+                                            disabled={submittingAction !== null}
+                                            onClick={() => handleModalAction("REJECT_QUOTE", { reason: rejectReason })}
+                                        >
+                                            Confirm Rejection
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <Button
+                                    size="sm"
+                                    disabled={submittingAction !== null}
+                                    onClick={() => handleModalAction("APPROVE_QUOTE", { price: Number(modalPrice), date: modalSchedule, time: modalSchedule, notes: modalNotes })}
+                                    className="h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg gap-1.5"
+                                >
+                                    <Check className="h-3.5 w-3.5" />
+                                    <span>{submittingAction === "APPROVE_QUOTE" ? "Approving..." : `⚡ 1-Click Approve (AED ${modalPrice})`}</span>
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={submittingAction !== null}
+                                    onClick={() => handleModalAction("REVISE_QUOTE", { price: Number(modalPrice), notes: modalNotes })}
+                                    className="h-8 text-xs font-bold bg-white text-blue-700 border-blue-300 hover:bg-blue-50 rounded-lg gap-1.5"
+                                >
+                                    <FileText className="h-3.5 w-3.5" />
+                                    <span>📝 Save Price Revision</span>
+                                </Button>
+                                {!showRejectInput && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setShowRejectInput(true)}
+                                        className="h-8 text-xs text-rose-700 hover:bg-rose-50 ml-auto"
+                                    >
+                                        <X className="h-3.5 w-3.5 mr-1" /> Decline
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Interactive Action Bar (Gate 2: Dispatch Pending) */}
+                    {(approval.status === "JOB_AUTHORIZATION_PENDING" || approval.status === "CUSTOMER_ACCEPTED") && (
+                        <div className="p-4 rounded-xl bg-purple-50/80 border border-purple-300 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-purple-900">
+                                    <Briefcase className="h-4 w-4 text-purple-600" />
+                                    <span>Authorize Technician Job Dispatch (Gate 2)</span>
+                                </div>
+                                <span className="text-[11px] text-slate-500 font-medium">Dispatcher: {modalReviewer}</span>
+                            </div>
+                            <p className="text-xs text-purple-900">Customer accepted quote. Confirm technician arrival window:</p>
+                            <div className="flex gap-2">
+                                <Input
+                                    value={modalSchedule}
+                                    onChange={(e) => setModalSchedule(e.target.value)}
+                                    placeholder="e.g. Thursday 18th Nov in the afternoon"
+                                    className="h-9 text-xs bg-white border-purple-300 font-medium flex-1"
+                                />
+                                <Button
+                                    size="sm"
+                                    disabled={submittingAction !== null}
+                                    onClick={() => handleModalAction("AUTHORIZE_JOB", { approved_date: modalSchedule, notes: modalNotes })}
+                                    className="h-9 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-sm gap-1.5"
+                                >
+                                    <Briefcase className="h-3.5 w-3.5" />
+                                    <span>{submittingAction === "AUTHORIZE_JOB" ? "Creating Eworks Job..." : "🚀 Authorize & Dispatch Job"}</span>
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </DialogContent>
         </Dialog>

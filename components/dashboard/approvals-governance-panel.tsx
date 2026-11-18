@@ -9,6 +9,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
 import { subDays, startOfDay, endOfDay } from "date-fns";
 import { getCachedData, setCachedData } from "@/lib/cache-utils";
+import { ApprovalActionCard } from "./approval-action-card";
 import {
     ApprovalDetailModal,
     APPROVAL_STATUS_META,
@@ -30,7 +31,10 @@ import {
     Send,
     ChevronLeft,
     ChevronRight,
-    Eye
+    Eye,
+    LayoutGrid,
+    List,
+    Check,
 } from "lucide-react";
 
 const PAGE_SIZE = 10;
@@ -45,6 +49,8 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
     const cachedInitial = getCachedData<any>(initialCacheKey);
 
     const [activeTab, setActiveTab] = useState<"approvals" | "notifications">("approvals");
+    const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+    const [autoSync, setAutoSync] = useState<boolean>(false);
     const [loading, setLoading] = useState(!cachedInitial);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -132,6 +138,14 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
         const hasCache = !!getCachedData(cacheKey);
         fetchData(!hasCache);
     }, [fetchData, customerId, dateRange]);
+
+    useEffect(() => {
+        if (!autoSync) return;
+        const timer = setInterval(() => {
+            fetchData(false);
+        }, 5000);
+        return () => clearInterval(timer);
+    }, [autoSync, fetchData]);
 
     // Reset pagination when filters change
     useEffect(() => {
@@ -390,24 +404,70 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                             </button>
                         </div>
 
-                        {/* Search & Refresh Controls */}
-                        <div className="flex items-center gap-2">
-                            <div className="relative w-full sm:w-64">
+                        {/* Search, View Switcher & Refresh Controls */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* View Switcher (Only on approvals tab) */}
+                            {activeTab === "approvals" && (
+                                <div className="flex items-center p-0.5 bg-slate-200/80 rounded-xl border border-slate-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("cards")}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                            viewMode === "cards"
+                                                ? "bg-white text-violet-900 shadow-xs"
+                                                : "text-slate-600 hover:text-slate-900"
+                                        }`}
+                                        title="Interactive Action Cards with 1-Click Approve & Dispatch"
+                                    >
+                                        <LayoutGrid className="h-3.5 w-3.5 text-violet-600" />
+                                        <span>Action Cards</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode("table")}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                            viewMode === "table"
+                                                ? "bg-white text-violet-900 shadow-xs"
+                                                : "text-slate-600 hover:text-slate-900"
+                                        }`}
+                                        title="Compact Tabular View"
+                                    >
+                                        <List className="h-3.5 w-3.5 text-violet-600" />
+                                        <span>Table</span>
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Auto-Sync Toggle */}
+                            <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={autoSync}
+                                    onChange={(e) => setAutoSync(e.target.checked)}
+                                    className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 h-3.5 w-3.5"
+                                />
+                                <span className="font-semibold text-[11px]">
+                                    {autoSync ? "Syncing (5s)" : "Auto-Sync"}
+                                </span>
+                            </label>
+
+                            <div className="relative w-full sm:w-56">
                                 <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder={activeTab === "approvals" ? "Search ID, customer, service, job#..." : "Search recipient, key, customer..."}
+                                    placeholder={activeTab === "approvals" ? "Search ID, customer, service..." : "Search recipient, key..."}
                                     className="pl-8 h-8 text-xs bg-white border-slate-200 rounded-xl"
                                 />
                             </div>
+
                             <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
                                 onClick={() => fetchData(false)}
                                 disabled={refreshing}
-                                className="h-8 text-xs rounded-xl border-slate-200 text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 gap-1.5"
+                                className="h-8 text-xs rounded-xl border-slate-200 text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-50 gap-1.5 cursor-pointer"
                             >
                                 <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-violet-600" : ""}`} />
                                 <span className="hidden sm:inline">Refresh</span>
@@ -467,6 +527,27 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                             <span>Loading live approvals &amp; governance audit logs...</span>
                         </div>
                     ) : activeTab === "approvals" ? (
+                        viewMode === "cards" ? (
+                            <div className="p-5 space-y-4 bg-slate-50/50">
+                                {paginatedApprovals.length === 0 ? (
+                                    <div className="p-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                                        No commercial approvals match the selected filter or date range.
+                                    </div>
+                                ) : (
+                                    paginatedApprovals.map((a) => (
+                                        <ApprovalActionCard
+                                            key={a.id || a.approval_id}
+                                            record={a}
+                                            onActionCompleted={() => fetchData(false)}
+                                            onViewDetails={(rec) => {
+                                                setSelectedApproval(rec);
+                                                setIsModalOpen(true);
+                                            }}
+                                        />
+                                    ))
+                                )}
+                            </div>
+                        ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
                                 <thead>
@@ -477,7 +558,7 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                         <th className="p-3.5">Pipeline Status</th>
                                         <th className="p-3.5">Total (AED)</th>
                                         <th className="p-3.5">Reviewer &amp; Channel</th>
-                                        <th className="p-3.5 text-right">Details</th>
+                                        <th className="p-3.5 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -494,6 +575,7 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                                 color: "bg-slate-100 text-slate-700 border-slate-200",
                                             };
                                             const isPendingReview = a.status === "SPECTRA_REVIEW_REQUIRED";
+                                            const isDispatch = a.status === "JOB_AUTHORIZATION_PENDING" || a.status === "CUSTOMER_ACCEPTED";
                                             return (
                                                 <tr
                                                     key={a.id}
@@ -508,7 +590,7 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                                     <td className="p-3.5">
                                                         <div className="font-mono font-bold text-slate-900">{a.approval_id}</div>
                                                         <div className="text-[10px] text-slate-400 mt-0.5">
-                                                            {formatDateTime(a.created_at)}
+                                                             {formatDateTime(a.created_at)}
                                                         </div>
                                                     </td>
                                                     <td className="p-3.5">
@@ -571,15 +653,46 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                                         )}
                                                     </td>
                                                     <td className="p-3.5 text-right">
-                                                        <Button
-                                                            type="button"
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="h-7 text-[11px] bg-white border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg px-2.5 gap-1"
-                                                        >
-                                                            <Eye className="h-3 w-3 text-slate-500" />
-                                                            <span>View</span>
-                                                        </Button>
+                                                        <div className="flex items-center justify-end gap-1.5">
+                                                            {isPendingReview ? (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedApproval(a);
+                                                                        setIsModalOpen(true);
+                                                                    }}
+                                                                    className="h-7 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-2.5 gap-1 cursor-pointer"
+                                                                >
+                                                                    <Check className="h-3 w-3" />
+                                                                    <span>Review</span>
+                                                                </Button>
+                                                            ) : isDispatch ? (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedApproval(a);
+                                                                        setIsModalOpen(true);
+                                                                    }}
+                                                                    className="h-7 text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg px-2.5 gap-1 cursor-pointer"
+                                                                >
+                                                                    <Briefcase className="h-3 w-3" />
+                                                                    <span>Dispatch</span>
+                                                                </Button>
+                                                            ) : null}
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-7 text-[11px] bg-white border-slate-200 text-slate-700 hover:bg-slate-50 rounded-lg px-2.5 gap-1"
+                                                            >
+                                                                <Eye className="h-3 w-3 text-slate-500" />
+                                                                <span>View</span>
+                                                            </Button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
@@ -588,6 +701,7 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                 </tbody>
                             </table>
                         </div>
+                        )
                     ) : (
                         /* Governance Audit Table: internal_notifications */
                         <div className="overflow-x-auto">
@@ -735,11 +849,12 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                 </CardContent>
             </Card>
 
-            {/* Read-Only Approval Pipeline Detail Modal */}
+            {/* Approval Pipeline Detail Modal with Interactive Review/Dispatch */}
             <ApprovalDetailModal
                 approval={selectedApproval}
                 open={isModalOpen}
                 onOpenChange={setIsModalOpen}
+                onActionCompleted={() => fetchData(false)}
             />
         </div>
     );

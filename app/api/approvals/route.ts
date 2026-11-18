@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin, supabase } from '@/lib/supabase';
-import { getCachedData, setCachedData } from '@/lib/cache-utils';
+import { getCachedData, setCachedData, clearCache } from '@/lib/cache-utils';
 
 export const dynamic = 'force-dynamic';
 
 const getDb = () => supabaseAdmin || supabase;
+
+export const AUTHORIZED_REVIEWER_EMAILS = [
+    'marketing@spectradubai.com',
+    'dispatch@spectradubai.com',
+    'tech@spectradubai.com',
+    'ops@spectrawide.com',
+    'admin@spectradubai.com',
+    'naveen@scalepods.tech',
+];
+
+const ACTION_API_URL = 'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-frontend-approval';
 
 export async function GET(request: NextRequest) {
     try {
@@ -103,7 +114,7 @@ export async function GET(request: NextRequest) {
         const approvalsList = rawApprovals || [];
         const notificationsList = rawNotifications || [];
 
-        // 3. Batch-fetch related customers & service episodes
+        // 3. Batch-fetch related customers, service episodes, and latest messages
         const customerIds = Array.from(
             new Set([
                 ...approvalsList.map((a: any) => a.customer_id),
@@ -140,17 +151,58 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        // Enrich approvals
+        // Fetch latest inbound messages for customers to provide context in approval cards
+        const messagesMap: Record<string, { body_text: string; channel: string }> = {};
+        if (customerIds.length > 0) {
+            const { data: latestMsgs } = await db
+                .from('messages')
+                .select('customer_id, body_text, channel, created_at')
+                .in('customer_id', customerIds)
+                .eq('direction', 'INBOUND')
+                .order('created_at', { ascending: false });
+            (latestMsgs || []).forEach((m: any) => {
+                if (m.customer_id && !messagesMap[m.customer_id]) {
+                    messagesMap[m.customer_id] = {
+                        body_text: m.body_text || '',
+                        channel: m.channel || 'WHATSAPP',
+                    };
+                }
+            });
+        }
+
+        // Enrich approvals with autofill properties
         const approvals = approvalsList.map((a: any) => {
             const cust = a.customer_id ? customersMap[a.customer_id] || null : null;
             const ep = a.service_episode_id ? episodesMap[a.service_episode_id] || null : null;
             const payload = a.proposal_payload || {};
+            const approvedPayload = a.approved_payload || {};
             const resolvedServiceName = a.service_name || payload.service || ep?.service_type || 'Maintenance Service';
             const resolvedProposedTotal =
                 payload.proposed_total ??
                 payload.total_amount ??
                 payload.proposed_price ??
                 null;
+
+            const jobAuthToken =
+                a.job_auth_id ||
+                (a.approval_id ? 'SPECTRA-JOB-AUTH-' + a.approval_id.replace('SPECTRA-APPROVAL-', '') : '');
+
+            const subtotalAed = Number(payload.subtotal ?? a.approved_subtotal ?? 0);
+            const vatAed = Number(payload.vat_amount ?? a.vat_amount ?? 0);
+            const totalAed = Number(
+                a.approved_total ??
+                (resolvedProposedTotal !== null ? resolvedProposedTotal : null) ??
+                (subtotalAed + vatAed > 0 ? subtotalAed + vatAed : 0)
+            );
+
+            const requestedTiming =
+                payload.preferred_timing ||
+                approvedPayload.timing ||
+                a.preferred_time ||
+                a.preferred_date ||
+                'Flexible';
+
+            const latestMsg = a.customer_id ? messagesMap[a.customer_id] : null;
 
             return {
                 ...a,
@@ -159,6 +211,13 @@ export async function GET(request: NextRequest) {
                 resolved_service_name: resolvedServiceName,
                 resolved_proposed_total: resolvedProposedTotal !== null ? Number(resolvedProposedTotal) : null,
                 resolved_address: payload.property_address || ep?.property_address || cust?.address_line || null,
+                job_auth_token: jobAuthToken,
+                subtotal_aed: subtotalAed,
+                vat_aed: vatAed,
+                total_aed: totalAed,
+                requested_timing: requestedTiming,
+                latest_customer_message: latestMsg?.body_text || '',
+                customer_channel: latestMsg?.channel || 'WHATSAPP',
             };
         });
 
@@ -178,13 +237,13 @@ export async function GET(request: NextRequest) {
             total: approvals.length,
             reviewRequired: approvals.filter((a: any) => a.status === 'SPECTRA_REVIEW_REQUIRED').length,
             awaitingCustomer: approvals.filter((a: any) => a.status === 'AWAITING_CUSTOMER_ACCEPTANCE').length,
-            customerAccepted: approvals.filter((a: any) => a.status === 'CUSTOMER_ACCEPTED' || a.status === 'SPECTRA_COMMERCIAL_APPROVED').length,
-            jobCreated: approvals.filter((a: any) => a.status === 'JOB_CREATED_UNASSIGNED').length,
+            customerAccepted: approvals.filter((a: any) => a.status === 'CUSTOMER_ACCEPTED' || a.status === 'JOB_AUTHORIZATION_PENDING' || a.status === 'SPECTRA_COMMERCIAL_APPROVED').length,
+            jobCreated: approvals.filter((a: any) => a.status === 'JOB_CREATED_UNASSIGNED' || a.status === 'JOB_AUTHORIZED').length,
             rejected: approvals.filter((a: any) => a.status === 'REJECTED' || a.status === 'CANCELLED').length,
             superseded: approvals.filter((a: any) => a.status === 'SUPERSEDED').length,
             totalApprovedAed: approvals
-                .filter((a: any) => ['AWAITING_CUSTOMER_ACCEPTANCE', 'CUSTOMER_ACCEPTED', 'JOB_CREATED_UNASSIGNED', 'SPECTRA_COMMERCIAL_APPROVED'].includes(a.status))
-                .reduce((acc: number, a: any) => acc + (Number(a.approved_total) || 0), 0),
+                .filter((a: any) => ['AWAITING_CUSTOMER_ACCEPTANCE', 'CUSTOMER_ACCEPTED', 'JOB_AUTHORIZATION_PENDING', 'JOB_CREATED_UNASSIGNED', 'JOB_AUTHORIZED', 'SPECTRA_COMMERCIAL_APPROVED'].includes(a.status))
+                .reduce((acc: number, a: any) => acc + (Number(a.approved_total ?? a.total_aed) || 0), 0),
         };
 
         const byType: Record<string, number> = {};
@@ -222,3 +281,80 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ success: false, error: err.message || 'Internal Server Error' }, { status: 500 });
     }
 }
+
+export async function POST(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { action, token, reviewer_email, price, date, time, approved_date, notes, reason } = body;
+
+        if (!action || !token) {
+            return NextResponse.json({
+                success: false,
+                action_executed: 'ERROR',
+                error: 'Missing required parameters: "action" and "token" are mandatory.'
+            }, { status: 400 });
+        }
+
+        const resolvedReviewer = (reviewer_email || (action === 'AUTHORIZE_JOB' ? 'dispatch@spectradubai.com' : 'marketing@spectradubai.com')).trim().toLowerCase();
+
+        const isAllowed = AUTHORIZED_REVIEWER_EMAILS.some((e) => e.toLowerCase() === resolvedReviewer);
+        if (!isAllowed) {
+            return NextResponse.json({
+                success: false,
+                action_executed: 'ERROR',
+                status: 'UNAUTHORIZED',
+                error: `Reviewer '${resolvedReviewer}' is not authorized. Must be one of: ${AUTHORIZED_REVIEWER_EMAILS.join(', ')}`,
+                approval_id: token
+            }, { status: 403 });
+        }
+
+        const payload: Record<string, any> = {
+            action,
+            token,
+            reviewer_email: resolvedReviewer,
+        };
+
+        if (price !== undefined && price !== null && !isNaN(Number(price))) {
+            payload.price = Number(price);
+        }
+        if (date) payload.date = date;
+        if (time) payload.time = time;
+        if (approved_date) payload.approved_date = approved_date;
+        if (notes) payload.notes = notes;
+        if (reason) payload.reason = reason;
+
+        const resp = await fetch(ACTION_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+            cache: 'no-store'
+        });
+
+        const resData = await resp.json().catch(() => null);
+
+        // Invalidate in-memory approvals cache so next fetch immediately returns fresh DB state
+        clearCache('approvals');
+
+        if (!resp.ok && !resData) {
+            return NextResponse.json({
+                success: false,
+                action_executed: 'ERROR',
+                error: `Webhook returned HTTP ${resp.status}`,
+                approval_id: token
+            }, { status: resp.status });
+        }
+
+        return NextResponse.json(resData || { success: true });
+    } catch (err: any) {
+        console.error('[API /api/approvals] POST action error:', err);
+        return NextResponse.json({
+            success: false,
+            action_executed: 'ERROR',
+            error: err.message || 'Internal Server Error'
+        }, { status: 500 });
+    }
+}
+

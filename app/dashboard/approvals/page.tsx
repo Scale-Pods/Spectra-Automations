@@ -17,15 +17,25 @@ export default function TeamApprovalsPage() {
                         <span>Team Approvals &amp; Governance</span>
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Live Pipeline
+                            Live Dual-Channel Pipeline
                         </span>
                     </h1>
+                    <p className="text-xs text-slate-500 mt-1">
+                        Dual-channel human-in-the-loop governance: Gate 1 Commercial Quotation Review &amp; Gate 2 eWorks Job Dispatch.
+                    </p>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs">
-                    <Mail className="h-3.5 w-3.5 text-violet-600" />
-                    <span className="text-slate-500">Governance Inbox:</span>
-                    <span className="font-bold text-slate-900">marketing@spectradubai.com</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                        <Mail className="h-3.5 w-3.5 text-amber-600" />
+                        <span className="text-slate-500">Quote Review:</span>
+                        <span className="font-bold text-slate-900 font-mono">marketing@spectradubai.com</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                        <Mail className="h-3.5 w-3.5 text-purple-600" />
+                        <span className="text-slate-500">Job Dispatch:</span>
+                        <span className="font-bold text-slate-900 font-mono">dispatch@spectradubai.com</span>
+                    </div>
                 </div>
             </div>
 
