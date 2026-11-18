@@ -19,6 +19,7 @@ import {
     AlertCircle,
     Info,
     Calendar,
+    Clock,
     X,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -134,10 +135,26 @@ export function ApprovalDetailModal({
     const [rejectReason, setRejectReason] = useState<string>("Property located outside designated service community.");
     const [showRejectInput, setShowRejectInput] = useState<boolean>(false);
     const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+    const [modalCooldownSeconds, setModalCooldownSeconds] = useState<number>(0);
     const [modalFeedback, setModalFeedback] = useState<{
         type: "success" | "info" | "error";
         message: string;
     } | null>(null);
+
+    // 30s Cooldown timer to prevent double-clicks while backend updates
+    useEffect(() => {
+        if (modalCooldownSeconds <= 0) return;
+        const timer = setInterval(() => {
+            setModalCooldownSeconds((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [modalCooldownSeconds]);
 
     useEffect(() => {
         if (!approval || !open) return;
@@ -190,8 +207,9 @@ export function ApprovalDetailModal({
     }, [approval, open]);
 
     const handleModalAction = async (actionType: string, customPayload: Record<string, any> = {}) => {
-        if (!approval) return;
+        if (!approval || modalCooldownSeconds > 0 || submittingAction !== null) return;
         setSubmittingAction(actionType);
+        setModalCooldownSeconds(30);
         setModalFeedback(null);
 
         const isDispatch =
@@ -589,47 +607,83 @@ export function ApprovalDetailModal({
                                         className="h-8 text-xs bg-white border-rose-300"
                                     />
                                     <div className="flex justify-end gap-2">
-                                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowRejectInput(false)}>Cancel</Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-xs"
+                                            disabled={submittingAction !== null || modalCooldownSeconds > 0}
+                                            onClick={() => setShowRejectInput(false)}
+                                        >
+                                            Cancel
+                                        </Button>
                                         <Button
                                             size="sm"
                                             className="h-7 text-xs bg-rose-700 hover:bg-rose-800 text-white font-bold"
-                                            disabled={submittingAction !== null}
+                                            disabled={submittingAction !== null || modalCooldownSeconds > 0}
                                             onClick={() => handleModalAction("REJECT_QUOTE", { reason: rejectReason })}
                                         >
-                                            Confirm Rejection
+                                            {submittingAction === "REJECT_QUOTE"
+                                                ? "Declining..."
+                                                : modalCooldownSeconds > 0
+                                                ? `Locked (${modalCooldownSeconds}s)`
+                                                : "Confirm Rejection"}
                                         </Button>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Cooldown Status Notification */}
+                            {modalCooldownSeconds > 0 && (
+                                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-100/70 border border-amber-300 text-amber-950 text-xs animate-pulse">
+                                    <Clock className="h-4 w-4 text-amber-700 shrink-0" />
+                                    <span>
+                                        Action submitted. Buttons locked for <strong>{modalCooldownSeconds}s</strong> to prevent double-clicking while backend updates.
+                                    </span>
                                 </div>
                             )}
 
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                                 <Button
                                     size="sm"
-                                    disabled={submittingAction !== null}
+                                    disabled={submittingAction !== null || modalCooldownSeconds > 0}
                                     onClick={() => handleModalAction("APPROVE_QUOTE", { price: Number(modalPrice), date: modalSchedule, time: modalSchedule, notes: modalNotes })}
-                                    className="h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg gap-1.5"
+                                    className="h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg gap-1.5"
                                 >
                                     <Check className="h-3.5 w-3.5" />
-                                    <span>{submittingAction === "APPROVE_QUOTE" ? "Approving..." : `⚡ 1-Click Approve (AED ${modalPrice})`}</span>
+                                    <span>
+                                        {submittingAction === "APPROVE_QUOTE"
+                                            ? "Approving..."
+                                            : modalCooldownSeconds > 0
+                                            ? `Processing... (${modalCooldownSeconds}s)`
+                                            : `⚡ 1-Click Approve (AED ${modalPrice})`}
+                                    </span>
                                 </Button>
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    disabled={submittingAction !== null}
+                                    disabled={submittingAction !== null || modalCooldownSeconds > 0}
                                     onClick={() => handleModalAction("REVISE_QUOTE", { price: Number(modalPrice), notes: modalNotes })}
-                                    className="h-8 text-xs font-bold bg-white text-blue-700 border-blue-300 hover:bg-blue-50 rounded-lg gap-1.5"
+                                    className="h-8 text-xs font-bold bg-white text-blue-700 border-blue-300 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg gap-1.5"
                                 >
                                     <FileText className="h-3.5 w-3.5" />
-                                    <span>📝 Save Price Revision</span>
+                                    <span>
+                                        {submittingAction === "REVISE_QUOTE"
+                                            ? "Saving..."
+                                            : modalCooldownSeconds > 0
+                                            ? `Locked (${modalCooldownSeconds}s)`
+                                            : "📝 Save Price Revision"}
+                                    </span>
                                 </Button>
                                 {!showRejectInput && (
                                     <Button
                                         size="sm"
                                         variant="ghost"
+                                        disabled={submittingAction !== null || modalCooldownSeconds > 0}
                                         onClick={() => setShowRejectInput(true)}
-                                        className="h-8 text-xs text-rose-700 hover:bg-rose-50 ml-auto"
+                                        className="h-8 text-xs text-rose-700 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed ml-auto"
                                     >
-                                        <X className="h-3.5 w-3.5 mr-1" /> Decline
+                                        <X className="h-3.5 w-3.5 mr-1" />
+                                        {modalCooldownSeconds > 0 ? `Locked (${modalCooldownSeconds}s)` : "Decline"}
                                     </Button>
                                 )}
                             </div>
@@ -647,6 +701,17 @@ export function ApprovalDetailModal({
                                 <span className="text-[11px] text-slate-500 font-medium">Dispatcher: {modalReviewer}</span>
                             </div>
                             <p className="text-xs text-purple-900">Customer accepted quote. Confirm technician arrival window:</p>
+
+                            {/* Cooldown Status Notification */}
+                            {modalCooldownSeconds > 0 && (
+                                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-purple-100/80 border border-purple-300 text-purple-950 text-xs animate-pulse">
+                                    <Clock className="h-4 w-4 text-purple-700 shrink-0" />
+                                    <span>
+                                        Dispatch request submitted. Buttons locked for <strong>{modalCooldownSeconds}s</strong> while backend registers job in Eworks CRM.
+                                    </span>
+                                </div>
+                            )}
+
                             <div className="flex gap-2">
                                 <Input
                                     value={modalSchedule}
@@ -656,12 +721,18 @@ export function ApprovalDetailModal({
                                 />
                                 <Button
                                     size="sm"
-                                    disabled={submittingAction !== null}
+                                    disabled={submittingAction !== null || modalCooldownSeconds > 0}
                                     onClick={() => handleModalAction("AUTHORIZE_JOB", { approved_date: modalSchedule, notes: modalNotes })}
-                                    className="h-9 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-sm gap-1.5"
+                                    className="h-9 text-xs font-bold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg shadow-sm gap-1.5"
                                 >
                                     <Briefcase className="h-3.5 w-3.5" />
-                                    <span>{submittingAction === "AUTHORIZE_JOB" ? "Creating Eworks Job..." : "🚀 Authorize & Dispatch Job"}</span>
+                                    <span>
+                                        {submittingAction === "AUTHORIZE_JOB"
+                                            ? "Creating Eworks Job..."
+                                            : modalCooldownSeconds > 0
+                                            ? `Dispatching... (${modalCooldownSeconds}s)`
+                                            : "🚀 Authorize & Dispatch Job"}
+                                    </span>
                                 </Button>
                             </div>
                         </div>

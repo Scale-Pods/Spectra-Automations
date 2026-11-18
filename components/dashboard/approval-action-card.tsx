@@ -91,6 +91,7 @@ export function ApprovalActionCard({
     const [showAdvancedReviewer, setShowAdvancedReviewer] = useState<boolean>(false);
 
     const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+    const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
     const [feedback, setFeedback] = useState<{
         type: "success" | "info" | "error";
         message: string;
@@ -98,6 +99,21 @@ export function ApprovalActionCard({
     } | null>(null);
 
     const [copiedToken, setCopiedToken] = useState(false);
+
+    // Cooldown countdown effect (locks buttons for 30s to prevent double-clicking and allow backend sync)
+    React.useEffect(() => {
+        if (cooldownSeconds <= 0) return;
+        const timer = setInterval(() => {
+            setCooldownSeconds((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [cooldownSeconds]);
 
     const copyToken = () => {
         const token = isDispatchPending ? (record.job_auth_token || record.job_auth_id) : record.approval_id;
@@ -109,7 +125,10 @@ export function ApprovalActionCard({
     };
 
     const handleAction = async (actionType: string, customPayload: Record<string, any> = {}) => {
+        if (cooldownSeconds > 0 || submittingAction !== null) return;
+
         setSubmittingAction(actionType);
+        setCooldownSeconds(30);
         setFeedback(null);
 
         const token = isDispatchPending
@@ -466,6 +485,7 @@ export function ApprovalActionCard({
                                         type="button"
                                         variant="outline"
                                         size="sm"
+                                        disabled={submittingAction !== null || cooldownSeconds > 0}
                                         onClick={() => setShowRejectBox(false)}
                                         className="h-7 text-xs"
                                     >
@@ -474,13 +494,27 @@ export function ApprovalActionCard({
                                     <Button
                                         type="button"
                                         size="sm"
-                                        disabled={submittingAction !== null}
+                                        disabled={submittingAction !== null || cooldownSeconds > 0}
                                         onClick={() => handleAction("REJECT_QUOTE", { reason: rejectReason })}
                                         className="h-7 text-xs bg-rose-700 hover:bg-rose-800 text-white font-bold"
                                     >
-                                        {submittingAction === "REJECT_QUOTE" ? "Declining..." : "Confirm Rejection"}
+                                        {submittingAction === "REJECT_QUOTE"
+                                            ? "Declining..."
+                                            : cooldownSeconds > 0
+                                            ? `Locked (${cooldownSeconds}s)`
+                                            : "Confirm Rejection"}
                                     </Button>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* Cooldown Status Notification */}
+                        {cooldownSeconds > 0 && (
+                            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-100/70 border border-amber-300 text-amber-950 text-xs animate-pulse">
+                                <Clock className="h-4 w-4 text-amber-700 shrink-0" />
+                                <span>
+                                    Action submitted. Buttons are locked for <strong>{cooldownSeconds}s</strong> to prevent double-clicking while backend updates.
+                                </span>
                             </div>
                         )}
 
@@ -489,7 +523,7 @@ export function ApprovalActionCard({
                             <Button
                                 type="button"
                                 size="sm"
-                                disabled={submittingAction !== null}
+                                disabled={submittingAction !== null || cooldownSeconds > 0}
                                 onClick={() =>
                                     handleAction("APPROVE_QUOTE", {
                                         price: Number(price),
@@ -498,12 +532,14 @@ export function ApprovalActionCard({
                                         notes,
                                     })
                                 }
-                                className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-4 rounded-xl shadow-xs transition-all gap-1.5 cursor-pointer"
+                                className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 rounded-xl shadow-xs transition-all gap-1.5 cursor-pointer"
                             >
                                 <Check className="h-3.5 w-3.5" />
                                 <span>
                                     {submittingAction === "APPROVE_QUOTE"
                                         ? "Sending Outbound Quote..."
+                                        : cooldownSeconds > 0
+                                        ? `Processing... (${cooldownSeconds}s)`
                                         : `⚡ 1-Click Approve (AED ${Number(price || 0).toFixed(2)})`}
                                 </span>
                             </Button>
@@ -512,19 +548,21 @@ export function ApprovalActionCard({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                disabled={submittingAction !== null}
+                                disabled={submittingAction !== null || cooldownSeconds > 0}
                                 onClick={() =>
                                     handleAction("REVISE_QUOTE", {
                                         price: Number(price),
                                         notes: `Revised to AED ${Number(price).toFixed(2)} via Portal`,
                                     })
                                 }
-                                className="h-9 text-xs font-bold bg-white hover:bg-blue-50 text-blue-700 border-blue-300 px-3.5 rounded-xl transition-all gap-1.5 cursor-pointer"
+                                className="h-9 text-xs font-bold bg-white hover:bg-blue-50 text-blue-700 border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed px-3.5 rounded-xl transition-all gap-1.5 cursor-pointer"
                             >
                                 <FileText className="h-3.5 w-3.5 text-blue-600" />
                                 <span>
                                     {submittingAction === "REVISE_QUOTE"
                                         ? "Saving Revision..."
+                                        : cooldownSeconds > 0
+                                        ? `Locked (${cooldownSeconds}s)`
                                         : "📝 Save Price Revision"}
                                 </span>
                             </Button>
@@ -534,12 +572,12 @@ export function ApprovalActionCard({
                                     type="button"
                                     size="sm"
                                     variant="ghost"
-                                    disabled={submittingAction !== null}
+                                    disabled={submittingAction !== null || cooldownSeconds > 0}
                                     onClick={() => setShowRejectBox(true)}
-                                    className="h-9 text-xs font-semibold text-rose-700 hover:bg-rose-50 hover:text-rose-900 ml-auto px-3 rounded-xl cursor-pointer"
+                                    className="h-9 text-xs font-semibold text-rose-700 hover:bg-rose-50 hover:text-rose-900 disabled:opacity-50 disabled:cursor-not-allowed ml-auto px-3 rounded-xl cursor-pointer"
                                 >
                                     <X className="h-3.5 w-3.5 mr-1" />
-                                    Decline / Reject
+                                    {cooldownSeconds > 0 ? `Locked (${cooldownSeconds}s)` : "Decline / Reject"}
                                 </Button>
                             )}
                         </div>
@@ -572,6 +610,16 @@ export function ApprovalActionCard({
                         <p className="text-xs text-purple-900 leading-snug">
                             Customer accepted quotation. Confirm arrival appointment window and authorize unassigned job creation in Eworks CRM:
                         </p>
+
+                        {/* Cooldown Status Notification */}
+                        {cooldownSeconds > 0 && (
+                            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-purple-100/80 border border-purple-300 text-purple-950 text-xs animate-pulse">
+                                <Clock className="h-4 w-4 text-purple-700 shrink-0" />
+                                <span>
+                                    Dispatch request submitted. Buttons locked for <strong>{cooldownSeconds}s</strong> while backend registers job in Eworks CRM.
+                                </span>
+                            </div>
+                        )}
 
                         {/* Reviewer Email Dropdown (Collapsible) */}
                         {showAdvancedReviewer && (
@@ -619,19 +667,21 @@ export function ApprovalActionCard({
 
                             <Button
                                 type="button"
-                                disabled={submittingAction !== null}
+                                disabled={submittingAction !== null || cooldownSeconds > 0}
                                 onClick={() =>
                                     handleAction("AUTHORIZE_JOB", {
                                         approved_date: schedule,
                                         notes,
                                     })
                                 }
-                                className="h-10 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white px-5 rounded-xl shadow-md transition-all gap-1.5 shrink-0 cursor-pointer"
+                                className="h-10 text-xs font-bold bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 rounded-xl shadow-md transition-all gap-1.5 shrink-0 cursor-pointer"
                             >
                                 <Briefcase className="h-3.5 w-3.5" />
                                 <span>
                                     {submittingAction === "AUTHORIZE_JOB"
                                         ? "Registering in Eworks CRM..."
+                                        : cooldownSeconds > 0
+                                        ? `Dispatching... (${cooldownSeconds}s)`
                                         : "🚀 Authorize & Dispatch Job"}
                                 </span>
                             </Button>
