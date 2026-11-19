@@ -382,18 +382,6 @@ export default function WhatsappChatPage() {
         }
     }, [initialSelectedId]);
 
-    const [pendingFilters, setPendingFilters] = useState<{
-        replyStatus: string[],
-        loops: string[],
-        messageStatus: string[],
-        templates: string[]
-    }>({
-        replyStatus: [],
-        loops: [],
-        messageStatus: [],
-        templates: []
-    });
-
     const [activeFilters, setActiveFilters] = useState<{
         replyStatus: string[],
         loops: string[],
@@ -595,21 +583,19 @@ export default function WhatsappChatPage() {
         };
     }, [filteredLeads]);
 
-    const handleApplyFilters = () => { setActiveFilters(pendingFilters); };
     const handleResetFilters = () => {
         const reset = { replyStatus: [], loops: [], messageStatus: [], templates: [] };
-        setPendingFilters(reset);
         setActiveFilters(reset);
     };
 
     const toggleFilter = (type: 'replyStatus' | 'loops' | 'messageStatus' | 'templates', value: string) => {
-        const current = pendingFilters[type];
-        const updated = current.includes(value)
-            ? current.filter(v => v !== value)
-            : [...current, value];
-        const nextFilters = { ...pendingFilters, [type]: updated };
-        setPendingFilters(nextFilters);
-        setActiveFilters(nextFilters);
+        setActiveFilters((prev) => {
+            const current = prev[type];
+            const updated = current.includes(value)
+                ? current.filter(v => v !== value)
+                : [...current, value];
+            return { ...prev, [type]: updated };
+        });
     };
 
     const paginatedLeads = useMemo(() => {
@@ -697,15 +683,14 @@ export default function WhatsappChatPage() {
                             </div>
 
                             <FilterSection title="Reply Status" >
-                                <FilterOption label="Replied" checked={pendingFilters.replyStatus.includes("Replied")} onCheckedChange={() => toggleFilter('replyStatus', "Replied")} />
-                                <FilterOption label="No Reply" checked={pendingFilters.replyStatus.includes("No Reply")} onCheckedChange={() => toggleFilter('replyStatus', "No Reply")} />
+                                <FilterOption label="Replied" checked={activeFilters.replyStatus.includes("Replied")} onCheckedChange={() => toggleFilter('replyStatus', "Replied")} />
+                                <FilterOption label="No Reply" checked={activeFilters.replyStatus.includes("No Reply")} onCheckedChange={() => toggleFilter('replyStatus', "No Reply")} />
                             </FilterSection>
 
-
-                            {pendingFilters.loops.length > 0 && (
+                            {activeFilters.loops.length > 0 && (
                                 <FilterSection title="Templates">
                                     <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                        {getStandardTemplates(pendingFilters.loops).map(t => (
+                                        {getStandardTemplates(activeFilters.loops).map(t => (
                                             <FilterOption 
                                                 key={t.id} 
                                                 id={t.id}
@@ -715,7 +700,7 @@ export default function WhatsappChatPage() {
                                                         <span className="text-[9px] text-[var(--label-tertiary)] font-mono uppercase">[{t.column}]</span>
                                                     </div>
                                                 } 
-                                                checked={pendingFilters.templates.includes(t.name)} 
+                                                checked={activeFilters.templates.includes(t.name)} 
                                                 onCheckedChange={() => toggleFilter('templates', t.name)} 
                                             />
                                         ))}
@@ -724,13 +709,11 @@ export default function WhatsappChatPage() {
                             )}
 
                             <FilterSection title="Message Status">
-                                <FilterOption label="Read" checked={pendingFilters.messageStatus.includes("Read")} onCheckedChange={() => toggleFilter('messageStatus', "Read")} />
-                                <FilterOption label="Sent" checked={pendingFilters.messageStatus.includes("Sent")} onCheckedChange={() => toggleFilter('messageStatus', "Sent")} />
-                                <FilterOption label="Failed" checked={pendingFilters.messageStatus.includes("Failed")} onCheckedChange={() => toggleFilter('messageStatus', "Failed")} />
-                                <FilterOption label="Delivered" checked={pendingFilters.messageStatus.includes("Delivered")} onCheckedChange={() => toggleFilter('messageStatus', "Delivered")} />
+                                <FilterOption label="Read" checked={activeFilters.messageStatus.includes("Read")} onCheckedChange={() => toggleFilter('messageStatus', "Read")} />
+                                <FilterOption label="Sent" checked={activeFilters.messageStatus.includes("Sent")} onCheckedChange={() => toggleFilter('messageStatus', "Sent")} />
+                                <FilterOption label="Failed" checked={activeFilters.messageStatus.includes("Failed")} onCheckedChange={() => toggleFilter('messageStatus', "Failed")} />
+                                <FilterOption label="Delivered" checked={activeFilters.messageStatus.includes("Delivered")} onCheckedChange={() => toggleFilter('messageStatus', "Delivered")} />
                             </FilterSection>
-
-                            <Button className="w-full bg-slate-900 hover:bg-slate-800 text-white h-9" size="sm" onClick={handleApplyFilters}>Apply Filters</Button>
                         </CardContent>
                     </Card>
                 </div>
