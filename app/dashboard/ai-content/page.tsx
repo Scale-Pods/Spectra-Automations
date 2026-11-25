@@ -73,7 +73,12 @@ import {
     Film,
     Mic,
     VolumeX,
-    Captions
+    Captions,
+    Wand2,
+    Pencil,
+    Edit3,
+    GitCompare,
+    SplitSquareVertical
 } from "lucide-react";
 
 export default function AIContentStudioPage() {
@@ -163,6 +168,14 @@ export default function AIContentStudioPage() {
     const [recentJobs, setRecentJobs] = useState<any[]>([]);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
     const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+
+    // In-place Output Editing & Version Lineage state
+    const [videoEditInstructions, setVideoEditInstructions] = useState('');
+    const [isEditingVideo, setIsEditingVideo] = useState(false);
+    const [imageEditInstructions, setImageEditInstructions] = useState('');
+    const [isEditingImage, setIsEditingImage] = useState(false);
+    const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+    const [compareTargetVersionId, setCompareTargetVersionId] = useState<string | null>(null);
 
     // Sequential Generation Steps (1: Asset Format -> 2: Model & Direction -> 3: Brief & Generate)
     const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
@@ -269,6 +282,49 @@ export default function AIContentStudioPage() {
     }, [activeVideoJob, editorVideoCost, videoEngine, videoResolution, videoShotCount, videoDurationS]);
 
     const activeVideoCost = activeJobVideoCost;
+
+    // Lineage and version comparison for multi-iteration video workflows
+    const currentVideoLineage = useMemo(() => {
+        if (!activeVideoJob) return [];
+        const rootId = activeVideoJob.editing_notes?.root_job_id || activeVideoJob.id;
+        const family = recentVideoJobs.filter(j => 
+            j.id === rootId || 
+            j.editing_notes?.root_job_id === rootId ||
+            j.editing_notes?.parent_job_id === rootId ||
+            (activeVideoJob.editing_notes?.root_job_id && (
+                j.editing_notes?.root_job_id === activeVideoJob.editing_notes.root_job_id || 
+                j.id === activeVideoJob.editing_notes.root_job_id
+            ))
+        );
+        if (!family.some(j => j.id === activeVideoJob.id)) {
+            family.push(activeVideoJob);
+        }
+        return family.sort((a, b) => {
+            const vA = Number(a.editing_notes?.version) || 1;
+            const vB = Number(b.editing_notes?.version) || 1;
+            if (vA !== vB) return vA - vB;
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
+    }, [activeVideoJob, recentVideoJobs]);
+
+    const originalVideoJob = useMemo(() => {
+        if (currentVideoLineage.length === 0) return activeVideoJob;
+        return currentVideoLineage[0];
+    }, [currentVideoLineage, activeVideoJob]);
+
+    const compareTargetJob = useMemo(() => {
+        if (currentVideoLineage.length <= 1) return null;
+        if (compareTargetVersionId) {
+            const found = currentVideoLineage.find(j => j.id === compareTargetVersionId);
+            if (found) return found;
+        }
+        // If active video is the original, compare against latest version
+        if (activeVideoJob?.id === originalVideoJob?.id) {
+            return currentVideoLineage[currentVideoLineage.length - 1];
+        }
+        // Otherwise compare against the original video
+        return originalVideoJob;
+    }, [currentVideoLineage, activeVideoJob, originalVideoJob, compareTargetVersionId]);
 
     // Ensure variant count stays within selected model capability
     useEffect(() => {
@@ -771,6 +827,103 @@ export default function AIContentStudioPage() {
         }
     };
 
+    // -------------------------------------------------------------
+    // VIDEO REVISION GENERATION: CREATES REFERENCED NEW VERSION
+    // -------------------------------------------------------------
+    const handleRegenerateVideoWithEdits = async () => {
+        const targetJobId = activeVideoJob?.id;
+        if (!targetJobId || !videoEditInstructions.trim()) return;
+
+        setIsEditingVideo(true);
+        setIsRenderingVideo(true);
+        setWebhookResult(null);
+        const parentVer = Number(activeVideoJob?.editing_notes?.version) || 1;
+        const nextVersion = parentVer + 1;
+        setVideoStatusFeedback(`Generating revised video (v${nextVersion}) based on Job #${targetJobId.slice(0, 8)}...`);
+
+        try {
+            const res = await fetch('/api/ai/video-jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'edit_render',
+                    jobId: targetJobId,
+                    edit_instructions: videoEditInstructions.trim(),
+                    shots_json: activeVideoJob?.shots_json,
+                    wantsSubtitles: videoWantsSubtitles,
+                    subtitleStyle: videoSubtitleStyle,
+                    baseWebhookUrl: webhookUrl.trim(),
+                    renderWebhookUrl: videoRenderWebhookUrl.trim()
+                })
+            });
+
+            const data = await res.json();
+            if (data.success && (data.job || data.jobId)) {
+                const newJobId = data.jobId || data.job?.id;
+                const newJob = data.job || {
+                    id: newJobId,
+                    status: 'rendering',
+                    render_progress: { stage: 'starting', percent: 5 },
+                    engine: activeVideoJob?.engine || videoEngine,
+                    resolution: activeVideoJob?.resolution || videoResolution,
+                    shots_json: activeVideoJob?.shots_json,
+                    editing_notes: {
+                        parent_job_id: targetJobId,
+                        root_job_id: data.rootJobId || targetJobId,
+                        version: data.version || nextVersion,
+                        version_label: `v${data.version || nextVersion}`,
+                        revision_notes: videoEditInstructions.trim()
+                    },
+                    created_at: new Date().toISOString()
+                };
+
+                // Add revised job to recentVideoJobs and tag the original parent with version info if missing
+                setRecentVideoJobs(prev => {
+                    const filtered = prev.filter(j => j.id !== newJob.id);
+                    const updated = [newJob, ...filtered].map(j => {
+                        if (j.id === targetJobId && !j.editing_notes?.version) {
+                            return {
+                                ...j,
+                                editing_notes: {
+                                    ...(j.editing_notes || {}),
+                                    version: 1,
+                                    version_label: 'v1 (Original)',
+                                    root_job_id: data.rootJobId || targetJobId
+                                }
+                            };
+                        }
+                        return j;
+                    });
+                    return updated;
+                });
+
+                setActiveVideoJob(newJob);
+
+                setWebhookResult({
+                    success: true,
+                    message: `Created Revision v${data.version || nextVersion} (#${newJobId.slice(0, 8)}) based on original! Veo AI is rendering with your edits.`
+                });
+                setVideoEditInstructions('');
+                startPollingVideoJob(newJobId);
+            } else {
+                setWebhookResult({
+                    success: false,
+                    error: data.error || 'Failed to generate revised video'
+                });
+                setIsRenderingVideo(false);
+            }
+        } catch (err: any) {
+            console.error('Video edit revision error:', err);
+            setWebhookResult({
+                success: false,
+                error: err.message || 'Network error while requesting video revision'
+            });
+            setIsRenderingVideo(false);
+        } finally {
+            setIsEditingVideo(false);
+        }
+    };
+
     // Update single shot prompt or text in active video job
     const handleUpdateShot = (shotIdx: number, field: 'prompt' | 'onScreenText', val: string) => {
         if (!activeVideoJob || !Array.isArray(activeVideoJob.shots_json)) return;
@@ -987,6 +1140,66 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
         }
     };
 
+    // -------------------------------------------------------------
+    // IMAGE EDIT & REGENERATE: SAME JOB ID WITHOUT CREATING NEW JOB
+    // -------------------------------------------------------------
+    const handleRegenerateImageWithEdits = async () => {
+        const targetJobId = activeJob?.id;
+        if (!targetJobId || !imageEditInstructions.trim()) return;
+
+        setIsEditingImage(true);
+        setIsGenerating(true);
+        setJobStatus('pending');
+        setWebhookResult(null);
+
+        const aspectStr = resolution === '1080x1920' ? '9:16' : resolution === '1080x1080' ? '1:1' : resolution === '1080x1350' ? '4:5' : '16:9';
+
+        try {
+            const res = await fetch('/api/ai/studio-jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'edit_regenerate',
+                    jobId: targetJobId,
+                    edit_instructions: imageEditInstructions.trim(),
+                    model: selectedModel,
+                    aspect_ratio: aspectStr,
+                    variants: activeModelObj.maxVariants === 1 ? 1 : variantCount,
+                    webhookUrl: webhookUrl.trim()
+                })
+            });
+
+            const data = await res.json();
+            if (data.success && data.job) {
+                setActiveJob(data.job);
+                setJobStatus('pending');
+                setWebhookResult({
+                    success: true,
+                    message: `Revisions submitted for Job #${targetJobId.slice(0, 8)}! Re-generating asset with your edits...`
+                });
+                setImageEditInstructions('');
+                startPollingJob(targetJobId);
+            } else {
+                setJobStatus('failed');
+                setIsGenerating(false);
+                setWebhookResult({
+                    success: false,
+                    error: data.error || 'Failed to regenerate image with edits'
+                });
+            }
+        } catch (err: any) {
+            console.error('Image edit regenerate error:', err);
+            setJobStatus('failed');
+            setIsGenerating(false);
+            setWebhookResult({
+                success: false,
+                error: err.message || 'Network error while revising image'
+            });
+        } finally {
+            setIsEditingImage(false);
+        }
+    };
+
     const currentServiceObj = DUBAI_MAINTENANCE_SERVICES.find(s => s.id === selectedServiceId);
 
     // Active resolution options depending on format
@@ -1002,39 +1215,34 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
             <MarketingNavTabs />
 
             {/* Studio Header Bar */}
-            <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-7 rounded-3xl border border-slate-800 shadow-xl">
-                <div className="absolute top-0 right-0 -mt-10 -mr-10 w-80 h-80 rounded-full bg-violet-600/20 blur-3xl pointer-events-none" />
-                <div className="absolute bottom-0 left-1/3 -mb-10 w-60 h-60 rounded-full bg-cyan-600/15 blur-3xl pointer-events-none" />
-
+            <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-80 h-80 bg-gradient-to-bl from-violet-100/50 via-indigo-50/30 to-transparent rounded-full blur-3xl pointer-events-none -mr-12 -mt-12" />
                 <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2.5">
-                            <span className="px-3 py-1 rounded-full bg-white/10 text-cyan-300 text-xs font-bold border border-white/15 flex items-center gap-1.5 backdrop-blur-md">
-                                <Wind className="h-3.5 w-3.5 text-cyan-400" />
-                                Spectra Dubai · AI Creative Studio
+                    <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full bg-violet-50 text-violet-700 text-xs font-bold border border-violet-200/80 flex items-center gap-1.5">
+                                <Sparkles className="h-3.5 w-3.5 text-violet-600" />
+                                Spectra AI Content Studio
                             </span>
-                            <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-semibold border border-emerald-500/30 flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                n8n + Supabase Job Queue
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-semibold border border-emerald-200 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                n8n &amp; Supabase Active
                             </span>
                             <a 
                                 href="https://www.spectradubai.com/" 
                                 target="_blank" 
                                 rel="noreferrer"
-                                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors ml-1"
+                                className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors ml-1"
                             >
                                 <span>spectradubai.com</span>
                                 <ExternalLink className="h-3 w-3" />
                             </a>
                         </div>
-                        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
-                            <span className="p-2 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg shadow-violet-500/30">
-                                <Sparkles className="h-6 w-6" />
-                            </span>
+                        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-2.5">
                             AI Marketing Creative Studio
                         </h1>
-                        <p className="text-sm text-slate-300 max-w-2xl leading-relaxed">
-                            Generate production-ready ad visuals and copy decks for Dubai property maintenance, backed by asynchronous n8n worker workflows and Supabase storage.
+                        <p className="text-xs sm:text-sm text-slate-500 max-w-2xl leading-relaxed">
+                            Generate and refine production-ready Dubai property maintenance ad visuals, cinematic reels, and ad copy decks with seamless in-place AI regeneration.
                         </p>
                     </div>
 
@@ -1045,10 +1253,10 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             type="button"
                             variant="outline"
                             onClick={() => setActiveOutputTab('history')}
-                            className="bg-white/5 border-white/15 text-white hover:bg-white/10 text-xs font-semibold rounded-2xl h-11 px-3.5 gap-1.5 backdrop-blur-md"
+                            className="bg-white border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl h-10 px-3.5 gap-1.5 shadow-2xs"
                         >
-                            <History className="h-4 w-4 text-cyan-300" />
-                            <span>History ({recentJobs.length})</span>
+                            <History className="h-4 w-4 text-slate-500" />
+                            <span>History ({recentJobs.length + recentVideoJobs.length})</span>
                         </Button>
 
                         {/* Webhook Settings Pill */}
@@ -1059,19 +1267,19 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                 <button
                                     type="button"
                                     onClick={() => setIsWebhookModalOpen(true)}
-                                    className={`px-3.5 py-2.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 transition-all shadow-sm backdrop-blur-md h-11 ${
+                                    className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-all shadow-2xs h-10 ${
                                         isConnected
-                                            ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
-                                            : 'bg-amber-950/60 text-amber-300 border-amber-500/40 hover:bg-amber-900/60'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100/70'
+                                            : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100/70'
                                     }`}
                                 >
-                                    <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                                    <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                                     <span className="truncate max-w-[150px] sm:max-w-none">
                                         {isVideoFormat
                                             ? (isConnected ? 'Video Webhooks Ready' : 'Configure Video Webhooks')
                                             : (isConnected ? 'Webhook Connected' : 'Configure Webhook')}
                                     </span>
-                                    <Settings className="h-3.5 w-3.5 text-slate-300 ml-0.5" />
+                                    <Settings className="h-3.5 w-3.5 text-slate-400 ml-0.5" />
                                 </button>
                             );
                         })()}
@@ -1080,7 +1288,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                         <Button
                             onClick={handleGenerateAndDispatch}
                             disabled={isGenerating}
-                            className="bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 hover:from-violet-700 hover:to-cyan-700 text-white font-bold rounded-2xl shadow-lg shadow-violet-500/30 h-11 px-5 text-sm gap-2 border border-white/20 transition-all"
+                            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold rounded-xl shadow-sm h-10 px-4 text-xs sm:text-sm gap-2 transition-all"
                         >
                             {isGenerating ? (
                                 <>
@@ -1091,7 +1299,7 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                 </>
                             ) : (
                                 <>
-                                    <Sparkles className="h-4 w-4 text-cyan-200" />
+                                    <Sparkles className="h-4 w-4 text-violet-200" />
                                     <span>Generate Creative</span>
                                 </>
                             )}
@@ -2622,6 +2830,104 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                            VIDEO PRODUCTION TAB: STORYBOARD, AUDIO & FINAL RENDER
                                            ------------------------------------------------------------- */
                                         <div className="space-y-4">
+                                            {/* Video Version Lineage Switcher Bar */}
+                                            {currentVideoLineage.length > 0 && (
+                                                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-violet-50/80 via-white to-slate-50 border border-violet-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 mr-1">
+                                                            <Layers className="h-4 w-4 text-violet-600" />
+                                                            <span>Video Versions ({currentVideoLineage.length}):</span>
+                                                        </span>
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            {currentVideoLineage.map((job) => {
+                                                                const isSelected = job.id === activeVideoJob?.id;
+                                                                const verNum = Number(job.editing_notes?.version) || 1;
+                                                                const isOriginal = verNum === 1;
+                                                                const isRendering = job.status === 'rendering';
+                                                                const isDone = job.status === 'completed' || Boolean(job.output_video_url || job.final_video_url);
+                                                                return (
+                                                                    <button
+                                                                        key={job.id}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setActiveVideoJob(job);
+                                                                            if (job.status === 'rendering') {
+                                                                                startPollingVideoJob(job.id);
+                                                                            }
+                                                                        }}
+                                                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs ${
+                                                                            isSelected
+                                                                                ? 'bg-violet-600 text-white shadow-xs ring-2 ring-violet-400 ring-offset-1'
+                                                                                : 'bg-white text-slate-700 border border-slate-200 hover:border-violet-300 hover:text-violet-700'
+                                                                        }`}
+                                                                    >
+                                                                        <span>v{verNum}</span>
+                                                                        <span className={`text-[10px] font-medium ${isSelected ? 'text-violet-100' : 'text-slate-500'}`}>
+                                                                            {isOriginal ? 'Original' : 'Edited'}
+                                                                        </span>
+                                                                        {isRendering && (
+                                                                            <RefreshCw className="h-3 w-3 animate-spin text-amber-300" />
+                                                                        )}
+                                                                        {isDone && !isSelected && (
+                                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                                                                        )}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+
+                                                    {currentVideoLineage.length > 1 && (
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={() => setIsCompareModalOpen(true)}
+                                                            className="bg-white hover:bg-violet-50 text-violet-700 font-bold text-xs h-8 px-3 rounded-xl gap-1.5 border border-violet-300 shadow-2xs hover:shadow-xs transition-all"
+                                                        >
+                                                            <GitCompare className="h-3.5 w-3.5 text-violet-600" />
+                                                            <span>Compare Side-by-Side</span>
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* Active Revision Applied Banner */}
+                                            {activeVideoJob?.editing_notes?.revision_notes && (
+                                                <div className="p-3 rounded-2xl bg-indigo-50/80 border border-indigo-200/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                                                    <div className="flex items-start gap-2.5 min-w-0">
+                                                        <div className="p-1 rounded-lg bg-indigo-600 text-white flex-shrink-0 mt-0.5">
+                                                            <Sparkles className="h-3.5 w-3.5" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-indigo-950">
+                                                                    Version {activeVideoJob.editing_notes?.version || 2} Revision Notes
+                                                                </span>
+                                                                {activeVideoJob.editing_notes?.parent_job_id && (
+                                                                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-200/70 text-indigo-800 font-semibold">
+                                                                        Referenced #{activeVideoJob.editing_notes.parent_job_id.slice(0, 8)}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-indigo-800 italic mt-0.5 leading-relaxed">
+                                                                &quot;{activeVideoJob.editing_notes.revision_notes}&quot;
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {originalVideoJob && activeVideoJob.id !== originalVideoJob.id && (
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => setActiveVideoJob(originalVideoJob)}
+                                                            className="text-[11px] h-7 px-2.5 bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-100 rounded-xl flex-shrink-0 font-semibold"
+                                                        >
+                                                            View Original (v1)
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {/* Progress State: Generating Brief or Rendering Video */}
                                             {isGeneratingVideoBrief ? (
                                                 <div className="p-6 rounded-2xl bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-200 text-center space-y-3">
@@ -2688,6 +2994,87 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                                     <span>Download MP4</span>
                                                                 </a>
                                                             </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* In-Place Video Edit & Re-Render Card */}
+                                                    <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-50/70 via-indigo-50/40 to-slate-50 border border-violet-200/90 shadow-2xs space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="p-1.5 rounded-lg bg-violet-600 text-white">
+                                                                    <Wand2 className="h-3.5 w-3.5" />
+                                                                </div>
+                                                                <div>
+                                                                    <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                                                        <span>Describe Changes for New Video Version</span>
+                                                                        <span className="text-[10px] font-mono px-1.5 py-0.2 bg-violet-100 text-violet-800 rounded font-bold">
+                                                                            v{(Number(activeVideoJob?.editing_notes?.version) || 1) + 1} Revision
+                                                                        </span>
+                                                                    </h5>
+                                                                    <p className="text-[11px] text-slate-500">
+                                                                        Describe what to change in words. A new video version will be generated referenced with the original, keeping all your previous versions intact.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <span className="text-[10px] font-bold text-violet-700 bg-violet-100/80 px-2 py-0.5 rounded-full border border-violet-200 hidden sm:inline-block">
+                                                                Version Lineage
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="space-y-1.5">
+                                                            <textarea
+                                                                value={videoEditInstructions}
+                                                                onChange={(e) => setVideoEditInstructions(e.target.value)}
+                                                                placeholder="Describe what to edit (e.g. 'Make camera pan slower, emphasize cool airflow reveal in shot 2, warmer lighting, clearer technician focus')..."
+                                                                rows={2}
+                                                                className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white placeholder:text-slate-400 resize-none shadow-2xs"
+                                                            />
+
+                                                            {/* Quick suggestion chips */}
+                                                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                                                <span className="text-[10px] font-semibold text-slate-400 mr-0.5">Quick edits:</span>
+                                                                {[
+                                                                    "🌅 Warmer cinematic lighting",
+                                                                    "⏱️ Slower camera pan",
+                                                                    "❄️ Emphasize cold airflow reveal",
+                                                                    "👨‍🔧 Focus more on technician in uniform",
+                                                                    "🏙️ Add Dubai skyline backdrop"
+                                                                ].map((chip, idx) => (
+                                                                    <button
+                                                                        key={idx}
+                                                                        type="button"
+                                                                        onClick={() => setVideoEditInstructions(prev => prev ? `${prev.trim()}, ${chip.replace(/^[^\w\s]+\s*/, '')}` : chip.replace(/^[^\w\s]+\s*/, ''))}
+                                                                        className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:border-violet-300 hover:text-violet-700 hover:bg-violet-50/50 transition-all font-medium"
+                                                                    >
+                                                                        {chip}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between pt-1">
+                                                            <span className="text-[10px] text-slate-500 font-mono">
+                                                                Engine: <strong className="text-slate-700">{activeVideoJob.engine || videoEngine}</strong>
+                                                            </span>
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                onClick={handleRegenerateVideoWithEdits}
+                                                                disabled={!videoEditInstructions.trim() || isRenderingVideo || isEditingVideo}
+                                                                className="h-8 text-xs px-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                                                            >
+                                                                {isEditingVideo || isRenderingVideo ? (
+                                                                    <>
+                                                                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                                                        <span>Generating Revision...</span>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <Sparkles className="h-3.5 w-3.5 text-violet-200" />
+                                                                        <span>⚡ Generate Revised Video (v{(Number(activeVideoJob?.editing_notes?.version) || 1) + 1})</span>
+                                                                    </>
+                                                                )}
+                                                            </Button>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -3230,6 +3617,89 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                                                                 </div>
                                                             </div>
                                                         ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* In-Place Image Edit & Regenerate Card */}
+                                            {activeJob?.id && (
+                                                <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-50/70 via-indigo-50/40 to-slate-50 border border-violet-200/90 shadow-2xs space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="p-1.5 rounded-lg bg-violet-600 text-white">
+                                                                <Wand2 className="h-3.5 w-3.5" />
+                                                            </div>
+                                                            <div>
+                                                                <h5 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                                                    <span>Edit &amp; Regenerate Image</span>
+                                                                    <span className="text-[10px] font-mono px-1.5 py-0.2 bg-violet-100 text-violet-800 rounded font-bold">
+                                                                        Job #{activeJob.id.slice(0, 8)}
+                                                                    </span>
+                                                                </h5>
+                                                                <p className="text-[11px] text-slate-500">
+                                                                    Describe what to change in words — will regenerate this exact job without creating a new one.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200 hidden sm:inline-block">
+                                                            In-Place Re-Render
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="space-y-1.5">
+                                                        <textarea
+                                                            value={imageEditInstructions}
+                                                            onChange={(e) => setImageEditInstructions(e.target.value)}
+                                                            placeholder="Describe what to edit (e.g. 'Make lighting warmer golden hour, replace background with luxury Palm Jumeirah villa, remove text overlays, clearer AC unit')..."
+                                                            rows={2}
+                                                            className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white placeholder:text-slate-400 resize-none shadow-2xs"
+                                                        />
+
+                                                        {/* Quick suggestion chips */}
+                                                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                                            <span className="text-[10px] font-semibold text-slate-400 mr-0.5">Quick edits:</span>
+                                                            {[
+                                                                "🌅 Warmer golden hour lighting",
+                                                                "🏙️ Luxury Dubai skyline backdrop",
+                                                                "✨ Modern minimalist villa interior",
+                                                                "🧼 Emphasize clean spotless AC coils",
+                                                                "👔 Professional technician focus"
+                                                            ].map((chip, idx) => (
+                                                                <button
+                                                                    key={idx}
+                                                                    type="button"
+                                                                    onClick={() => setImageEditInstructions(prev => prev ? `${prev.trim()}, ${chip.replace(/^[^\w\s]+\s*/, '')}` : chip.replace(/^[^\w\s]+\s*/, ''))}
+                                                                    className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 hover:border-violet-300 hover:text-violet-700 hover:bg-violet-50/50 transition-all font-medium"
+                                                                >
+                                                                    {chip}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between pt-1">
+                                                        <span className="text-[10px] text-slate-500 font-mono">
+                                                            Model: <strong className="text-slate-700">{activeJob.model || selectedModel}</strong> · {activeJobCost.formattedPerImage}
+                                                        </span>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={handleRegenerateImageWithEdits}
+                                                            disabled={!imageEditInstructions.trim() || isGenerating || isEditingImage}
+                                                            className="h-8 text-xs px-3.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                                                        >
+                                                            {isEditingImage || isGenerating ? (
+                                                                <>
+                                                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                                                    <span>Regenerating...</span>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Sparkles className="h-3.5 w-3.5 text-violet-200" />
+                                                                    <span>⚡ Regenerate Image with Edits</span>
+                                                                </>
+                                                            )}
+                                                        </Button>
                                                     </div>
                                                 </div>
                                             )}
@@ -4140,6 +4610,185 @@ Total Job Cost: ${activeJobCost.formattedTotal} (AED)
                             className="bg-violet-600 text-white rounded-xl text-xs font-semibold"
                         >
                             Close
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* SIDE-BY-SIDE VIDEO VERSION COMPARISON MODAL */}
+            <Dialog open={isCompareModalOpen} onOpenChange={setIsCompareModalOpen}>
+                <DialogContent className="sm:max-w-5xl rounded-3xl bg-white p-6 max-h-[92vh] overflow-y-auto">
+                    <DialogHeader>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div>
+                                <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                    <GitCompare className="h-5 w-5 text-violet-600" />
+                                    Video Version Comparison
+                                </DialogTitle>
+                                <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                                    Compare original master video side-by-side with your revised video to review changes in lighting, angles, and pacing.
+                                </DialogDescription>
+                            </div>
+                            {currentVideoLineage.length > 2 && (
+                                <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl flex-wrap">
+                                    <span className="text-[10px] font-bold text-slate-500 px-1">Compare with:</span>
+                                    {currentVideoLineage.filter(j => j.id !== originalVideoJob?.id).map(revJob => (
+                                        <button
+                                            key={revJob.id}
+                                            type="button"
+                                            onClick={() => setCompareTargetVersionId(revJob.id)}
+                                            className={`text-[11px] font-bold px-2.5 py-1 rounded-xl transition-all ${
+                                                (compareTargetJob?.id === revJob.id)
+                                                    ? 'bg-violet-600 text-white shadow-2xs'
+                                                    : 'text-slate-700 hover:bg-white'
+                                            }`}
+                                        >
+                                            v{revJob.editing_notes?.version || 2}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </DialogHeader>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                        {/* ORIGINAL VIDEO (v1) */}
+                        <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50/70 space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                                <div className="flex items-center gap-2">
+                                    <span className="w-6 h-6 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs font-bold">
+                                        v1
+                                    </span>
+                                    <div>
+                                        <h4 className="text-xs font-bold text-slate-900">Original Master Video</h4>
+                                        <span className="text-[10px] text-slate-500 font-mono">
+                                            #{originalVideoJob?.id?.slice(0, 8)} · {originalVideoJob?.engine || videoEngine}
+                                        </span>
+                                    </div>
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-800">
+                                    Base Master
+                                </span>
+                            </div>
+
+                            <div className="rounded-xl overflow-hidden bg-black aspect-[9/16] max-h-[440px] flex items-center justify-center mx-auto shadow-sm">
+                                {(originalVideoJob?.output_video_url || originalVideoJob?.final_video_url) ? (
+                                    <video
+                                        controls
+                                        playsInline
+                                        className="w-full h-full object-contain"
+                                        src={originalVideoJob.output_video_url || originalVideoJob.final_video_url}
+                                    />
+                                ) : (
+                                    <div className="text-center p-4 text-slate-400 text-xs">
+                                        <Film className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                        <span>Original video not rendered yet</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                                <span className="text-[11px] text-slate-500">
+                                    Resolution: <strong className="text-slate-700">{originalVideoJob?.resolution || videoResolution}</strong>
+                                </span>
+                                {(originalVideoJob?.output_video_url || originalVideoJob?.final_video_url) && (
+                                    <a
+                                        href={originalVideoJob.output_video_url || originalVideoJob.final_video_url}
+                                        download={`spectra-v1-${originalVideoJob.id.slice(0, 8)}.mp4`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-slate-700 hover:text-slate-900 font-semibold flex items-center gap-1 hover:underline"
+                                    >
+                                        <Download className="h-3 w-3" />
+                                        <span>Download v1</span>
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* REVISED VIDEO (v2+) */}
+                        <div className="rounded-2xl border border-violet-200 p-4 bg-violet-50/40 space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-violet-200/80">
+                                <div className="flex items-center gap-2">
+                                    <span className="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center text-xs font-bold">
+                                        v{compareTargetJob?.editing_notes?.version || 2}
+                                    </span>
+                                    <div>
+                                        <h4 className="text-xs font-bold text-violet-950">Revised Video Edition</h4>
+                                        <span className="text-[10px] text-violet-700 font-mono">
+                                            #{compareTargetJob?.id?.slice(0, 8)} · {compareTargetJob?.engine || videoEngine}
+                                        </span>
+                                    </div>
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+                                    AI Revised Edition
+                                </span>
+                            </div>
+
+                            {/* Edit Instructions Box */}
+                            {compareTargetJob?.editing_notes?.revision_notes && (
+                                <div className="p-2.5 rounded-xl bg-white border border-violet-200 text-xs text-violet-900 shadow-2xs">
+                                    <span className="text-[10px] font-bold text-violet-600 uppercase tracking-wider block">
+                                        Requested Changes Applied:
+                                    </span>
+                                    <p className="italic mt-0.5 text-[11px] leading-relaxed">
+                                        &quot;{compareTargetJob.editing_notes.revision_notes}&quot;
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="rounded-xl overflow-hidden bg-black aspect-[9/16] max-h-[440px] flex items-center justify-center mx-auto shadow-sm">
+                                {(compareTargetJob?.output_video_url || compareTargetJob?.final_video_url) ? (
+                                    <video
+                                        controls
+                                        playsInline
+                                        className="w-full h-full object-contain"
+                                        src={compareTargetJob.output_video_url || compareTargetJob.final_video_url}
+                                    />
+                                ) : compareTargetJob?.status === 'rendering' ? (
+                                    <div className="text-center p-6 text-violet-200 text-xs space-y-2">
+                                        <RefreshCw className="h-7 w-7 mx-auto animate-spin text-violet-400" />
+                                        <p className="font-semibold text-white">Veo AI is rendering revised clips...</p>
+                                        <p className="text-[11px] text-violet-300">
+                                            {compareTargetJob.render_progress?.percent ? `${compareTargetJob.render_progress.percent}% complete` : 'Stitching new clips with Veo'}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="text-center p-4 text-slate-400 text-xs">
+                                        <Film className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                        <span>No revised video rendered yet</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                                <span className="text-[11px] text-slate-500">
+                                    Status: <strong className="text-violet-700 capitalize">{compareTargetJob?.status || 'Ready'}</strong>
+                                </span>
+                                {(compareTargetJob?.output_video_url || compareTargetJob?.final_video_url) && (
+                                    <a
+                                        href={compareTargetJob.output_video_url || compareTargetJob.final_video_url}
+                                        download={`spectra-revised-${compareTargetJob.id.slice(0, 8)}.mp4`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs bg-violet-600 hover:bg-violet-700 text-white font-bold px-3 py-1 rounded-lg flex items-center gap-1 shadow-2xs"
+                                    >
+                                        <Download className="h-3 w-3" />
+                                        <span>Download v{compareTargetJob.editing_notes?.version || 2}</span>
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="border-t border-slate-100 pt-3">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsCompareModalOpen(false)}
+                            className="rounded-xl text-xs"
+                        >
+                            Close Comparison
                         </Button>
                     </DialogFooter>
                 </DialogContent>

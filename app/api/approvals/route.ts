@@ -50,16 +50,7 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ success: true, messages: messages || [] });
         }
 
-        if (!includeMessages) {
-            const cacheKey = `approvals-api:${customerId || 'all'}:${approvalId || 'all'}:${from || 'none'}:${to || 'none'}:${limit}`;
-            const cached = getCachedData<any>(cacheKey);
-            if (cached) {
-                return NextResponse.json(cached, {
-                    headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
-                });
-            }
-        }
-
+        // Operational Approvals Inbox: Real-time queries bypass caching to prevent stale approvals
         // 1. Fetch commercial approvals (with optional customer_id / date range filters)
         let approvalsQuery = db
             .from('commercial_approvals')
@@ -232,13 +223,19 @@ export async function GET(request: NextRequest) {
             };
         });
 
-        // 4. Compute summary metrics
+        // 4. Compute summary metrics aligned with the 4 Main Steps
         const approvalsSummary = {
             total: approvals.length,
+            // Step 1: New quote created, waiting for Spectra team to click Approve
             reviewRequired: approvals.filter((a: any) => a.status === 'SPECTRA_REVIEW_REQUIRED').length,
-            awaitingCustomer: approvals.filter((a: any) => a.status === 'AWAITING_CUSTOMER_ACCEPTANCE').length,
-            customerAccepted: approvals.filter((a: any) => a.status === 'CUSTOMER_ACCEPTED' || a.status === 'JOB_AUTHORIZATION_PENDING' || a.status === 'SPECTRA_COMMERCIAL_APPROVED').length,
+            // Step 2: Quote approved, sent to customer, waiting for customer to say YES
+            awaitingCustomer: approvals.filter((a: any) => a.status === 'AWAITING_CUSTOMER_ACCEPTANCE' || a.status === 'SPECTRA_COMMERCIAL_APPROVED').length,
+            // Step 3: Customer said YES, waiting for Spectra team to click Dispatch Job
+            jobAuthPending: approvals.filter((a: any) => a.status === 'JOB_AUTHORIZATION_PENDING' || a.status === 'CUSTOMER_ACCEPTED').length,
+            customerAccepted: approvals.filter((a: any) => a.status === 'JOB_AUTHORIZATION_PENDING' || a.status === 'CUSTOMER_ACCEPTED').length,
+            // Step 4: Job booked and created in eWorks CRM
             jobCreated: approvals.filter((a: any) => a.status === 'JOB_CREATED_UNASSIGNED' || a.status === 'JOB_AUTHORIZED').length,
+            // Rejected or cancelled
             rejected: approvals.filter((a: any) => a.status === 'REJECTED' || a.status === 'CANCELLED').length,
             superseded: approvals.filter((a: any) => a.status === 'SUPERSEDED').length,
             totalApprovedAed: approvals
@@ -268,13 +265,13 @@ export async function GET(request: NextRequest) {
             notificationsSummary,
         };
 
-        if (!includeMessages) {
-            const cacheKey = `approvals-api:${customerId || 'all'}:${approvalId || 'all'}:${from || 'none'}:${to || 'none'}:${limit}`;
-            setCachedData(cacheKey, responsePayload);
-        }
-
+        // Real-time headers: never cache on Vercel CDN or browser for governance inbox
         return NextResponse.json(responsePayload, {
-            headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60' }
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+            }
         });
     } catch (err: any) {
         console.error('[API /api/approvals] GET error:', err);

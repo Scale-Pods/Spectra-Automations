@@ -60,6 +60,7 @@ const DIRECT_WEBHOOK_URL = 'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-f
 export async function executeApprovalAction(payload: ApprovalActionPayload): Promise<ApprovalActionResult> {
     // Invalidate client-side cache immediately
     clearCache('approvals');
+    clearCache('approvals-panel');
 
     // 1. Attempt Next.js API route first (server-side proxy + cache invalidation)
     try {
@@ -74,6 +75,7 @@ export async function executeApprovalAction(payload: ApprovalActionPayload): Pro
 
         const data = await response.json();
         clearCache('approvals');
+        clearCache('approvals-panel');
         return data;
     } catch (apiErr: any) {
         console.warn('Local /api/approvals proxy failed, attempting direct webhook fallback:', apiErr);
@@ -91,6 +93,7 @@ export async function executeApprovalAction(payload: ApprovalActionPayload): Pro
 
             const fallbackData = await fallbackResponse.json();
             clearCache('approvals');
+            clearCache('approvals-panel');
             return fallbackData;
         } catch (directErr: any) {
             console.error('All webhook endpoints failed:', directErr);

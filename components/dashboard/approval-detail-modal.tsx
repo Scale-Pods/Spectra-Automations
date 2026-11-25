@@ -29,31 +29,43 @@ import { Button } from "@/components/ui/button";
 
 export const APPROVAL_STATUS_META: Record<string, { label: string; short: string; color: string; step: number }> = {
     SPECTRA_REVIEW_REQUIRED: {
-        label: "Email sent, waiting internal team review",
+        label: "New quote created, waiting team review & approval",
         short: "Spectra Review Required",
         color: "bg-amber-50 text-amber-800 border-amber-200",
         step: 1,
     },
     AWAITING_CUSTOMER_ACCEPTANCE: {
-        label: "Approved by team, sent to customer",
+        label: "Quote approved by team, sent to customer (waiting YES)",
         short: "Awaiting Customer Acceptance",
         color: "bg-indigo-50 text-indigo-800 border-indigo-200",
         step: 2,
     },
     SPECTRA_COMMERCIAL_APPROVED: {
-        label: "Commercially approved",
+        label: "Quote approved, awaiting customer acceptance",
         short: "Commercial Approved",
         color: "bg-teal-50 text-teal-800 border-teal-200",
         step: 2,
     },
+    JOB_AUTHORIZATION_PENDING: {
+        label: "Customer accepted quote, waiting dispatch authorization",
+        short: "Job Authorization Pending",
+        color: "bg-purple-50 text-purple-800 border-purple-200",
+        step: 3,
+    },
     CUSTOMER_ACCEPTED: {
-        label: "Customer agreed to quote",
-        short: "Customer Accepted",
-        color: "bg-cyan-50 text-cyan-800 border-cyan-200",
+        label: "Customer agreed to quote, pending job authorization",
+        short: "Job Authorization Pending",
+        color: "bg-purple-50 text-purple-800 border-purple-200",
         step: 3,
     },
     JOB_CREATED_UNASSIGNED: {
-        label: "Booked into eWorks",
+        label: "Job booked & created in eWorks CRM",
+        short: "Job Created (eWorks)",
+        color: "bg-emerald-50 text-emerald-800 border-emerald-200",
+        step: 4,
+    },
+    JOB_AUTHORIZED: {
+        label: "Job authorized & created in eWorks",
         short: "Job Created (eWorks)",
         color: "bg-emerald-50 text-emerald-800 border-emerald-200",
         step: 4,
@@ -297,9 +309,9 @@ export function ApprovalDetailModal({
     const totalVal = approval.approved_total ?? approval.resolved_proposed_total ?? null;
 
     const pipelineSteps = [
-        { step: 1, key: "SPECTRA_REVIEW_REQUIRED", label: "Team Review Required" },
+        { step: 1, key: "SPECTRA_REVIEW_REQUIRED", label: "Quote Review Required" },
         { step: 2, key: "AWAITING_CUSTOMER_ACCEPTANCE", label: "Awaiting Customer" },
-        { step: 3, key: "CUSTOMER_ACCEPTED", label: "Customer Accepted" },
+        { step: 3, key: "JOB_AUTHORIZATION_PENDING", label: "Job Dispatch Pending" },
         { step: 4, key: "JOB_CREATED_UNASSIGNED", label: "Booked in eWorks" },
     ];
 

@@ -25,7 +25,111 @@ export async function POST(req: Request) {
 
         const db = getDb();
 
-        // 1. Create the studio job in Supabase
+        // -------------------------------------------------------------
+        // ACTION: IN-PLACE REGENERATION WITH USER EDITS (SAME JOB ID)
+        // -------------------------------------------------------------
+        if (body.action === 'edit_regenerate' || (body.jobId && (body.action === 'regenerate' || body.edit_instructions))) {
+            const targetJobId = body.jobId;
+            const editInstructions = (body.edit_instructions || body.edits || '').trim();
+
+            const { data: existingJob, error: fetchErr } = await db
+                .from('spectra_studio_jobs')
+                .select('*')
+                .eq('id', targetJobId)
+                .single();
+
+            if (fetchErr || !existingJob) {
+                return NextResponse.json({ success: false, error: 'Studio job not found' }, { status: 404 });
+            }
+
+            const basePrompt = body.image_prompt || existingJob.image_prompt || existingJob.topic || '';
+            const revisedPrompt = editInstructions
+                ? `${basePrompt}\n\n[USER REVISION & EDITS]: ${editInstructions}`
+                : basePrompt;
+
+            const updatePayload: any = {
+                image_prompt: revisedPrompt,
+                status: 'pending',
+                updated_at: new Date().toISOString()
+            };
+
+            if (body.model) updatePayload.model = body.model;
+            if (body.aspect_ratio) updatePayload.aspect_ratio = body.aspect_ratio;
+            if (body.variants) updatePayload.variants = body.variants;
+
+            const { data: updatedJob, error: updateErr } = await db
+                .from('spectra_studio_jobs')
+                .update(updatePayload)
+                .eq('id', targetJobId)
+                .select()
+                .single();
+
+            if (updateErr) {
+                return NextResponse.json({ success: false, error: updateErr.message }, { status: 500 });
+            }
+
+            // Re-dispatch to n8n webhook using the SAME jobId (no new job is created)
+            const targetWebhookUrl = webhookUrl?.trim() || process.env.N8N_STUDIO_WEBHOOK_URL;
+            let webhookResult = null;
+            let webhookDispatched = false;
+
+            if (targetWebhookUrl && (targetWebhookUrl.startsWith('http://') || targetWebhookUrl.startsWith('https://'))) {
+                try {
+                    const startTime = Date.now();
+                    const webhookRes = await fetch(targetWebhookUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'Spectra-AI-Studio/2.0'
+                        },
+                        body: JSON.stringify({
+                            jobId: targetJobId,
+                            edit_instructions: editInstructions,
+                            body: {
+                                jobId: targetJobId,
+                                edit_instructions: editInstructions
+                            }
+                        })
+                    });
+
+                    const latencyMs = Date.now() - startTime;
+                    let resData: any = null;
+                    const contentType = webhookRes.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        resData = await webhookRes.json();
+                    } else {
+                        resData = await webhookRes.text();
+                    }
+
+                    webhookDispatched = webhookRes.ok;
+                    webhookResult = {
+                        success: webhookRes.ok,
+                        status: webhookRes.status,
+                        latencyMs,
+                        response: resData,
+                        url: targetWebhookUrl
+                    };
+                } catch (netErr: any) {
+                    console.warn('Could not contact n8n webhook on regenerate:', netErr.message);
+                    webhookResult = {
+                        success: false,
+                        error: netErr.message,
+                        url: targetWebhookUrl
+                    };
+                }
+            }
+
+            return NextResponse.json({
+                success: true,
+                jobId: targetJobId,
+                job: updatedJob,
+                webhookDispatched,
+                webhookResult,
+                isRegeneration: true
+            });
+        }
+
+        // 1. Create the studio job in Supabase (For brand new jobs only)
         const insertPayload: any = {
             post_type,
             topic: topic || 'Spectra Dubai Maintenance Creative',

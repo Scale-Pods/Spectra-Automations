@@ -111,8 +111,15 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                     params.set("to", endOfDay(endTarget).toISOString());
                 }
                 params.set("limit", "500");
+                params.set("_t", Date.now().toString());
 
-                const res = await fetch(`/api/approvals?${params.toString()}`);
+                const res = await fetch(`/api/approvals?${params.toString()}`, {
+                    cache: "no-store",
+                    headers: {
+                        "Pragma": "no-cache",
+                        "Cache-Control": "no-cache"
+                    }
+                });
                 const data = await res.json();
                 if (data.success) {
                     setApprovals(data.approvals || []);
@@ -161,6 +168,12 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
             if (approvalStatusFilter !== "ALL") {
                 if (approvalStatusFilter === "REJECTED") {
                     if (a.status !== "REJECTED" && a.status !== "CANCELLED") return false;
+                } else if (approvalStatusFilter === "JOB_AUTHORIZATION_PENDING" || approvalStatusFilter === "CUSTOMER_ACCEPTED") {
+                    if (a.status !== "JOB_AUTHORIZATION_PENDING" && a.status !== "CUSTOMER_ACCEPTED") return false;
+                } else if (approvalStatusFilter === "JOB_CREATED_UNASSIGNED" || approvalStatusFilter === "JOB_AUTHORIZED") {
+                    if (a.status !== "JOB_CREATED_UNASSIGNED" && a.status !== "JOB_AUTHORIZED") return false;
+                } else if (approvalStatusFilter === "AWAITING_CUSTOMER_ACCEPTANCE") {
+                    if (a.status !== "AWAITING_CUSTOMER_ACCEPTANCE" && a.status !== "SPECTRA_COMMERCIAL_APPROVED") return false;
                 } else if (a.status !== approvalStatusFilter) {
                     return false;
                 }
@@ -280,57 +293,110 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                 </div>
             )}
 
-            {/* Top Summary Strip (Full View) */}
+            {/* Top Summary Strip: The 4 Main Pipeline Steps */}
             {!compact && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+                    {/* Step 1: Quote Review Required */}
                     <Card
                         onClick={() => {
                             setActiveTab("approvals");
                             setApprovalStatusFilter("SPECTRA_REVIEW_REQUIRED");
                         }}
-                        className="bg-white/95 border border-amber-200/80 shadow-sm hover:shadow-md transition-all rounded-2xl p-4 cursor-pointer"
+                        className={`bg-white/95 border shadow-sm hover:shadow-md transition-all rounded-2xl p-3.5 cursor-pointer ${
+                            approvalStatusFilter === "SPECTRA_REVIEW_REQUIRED"
+                                ? "border-amber-400 ring-2 ring-amber-300/40 bg-amber-50/20"
+                                : "border-amber-200/80"
+                        }`}
                     >
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Team Review Required</p>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold">1</span>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Quote Review</p>
+                                </div>
                                 <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{approvalsSummary.reviewRequired}</h3>
                             </div>
                             <div className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-200">
                                 <Clock className="h-4 w-4" />
                             </div>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-2">Waiting team review via Gmail</p>
+                        <p className="text-[11px] text-slate-500 mt-2">New quote · Waiting team approve</p>
                     </Card>
 
+                    {/* Step 2: Awaiting Customer Acceptance */}
                     <Card
                         onClick={() => {
                             setActiveTab("approvals");
                             setApprovalStatusFilter("AWAITING_CUSTOMER_ACCEPTANCE");
                         }}
-                        className="bg-white/95 border border-indigo-200/80 shadow-sm hover:shadow-md transition-all rounded-2xl p-4 cursor-pointer"
+                        className={`bg-white/95 border shadow-sm hover:shadow-md transition-all rounded-2xl p-3.5 cursor-pointer ${
+                            approvalStatusFilter === "AWAITING_CUSTOMER_ACCEPTANCE"
+                                ? "border-indigo-400 ring-2 ring-indigo-300/40 bg-indigo-50/20"
+                                : "border-indigo-200/80"
+                        }`}
                     >
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">Awaiting Customer</p>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-indigo-500 text-white flex items-center justify-center text-[10px] font-bold">2</span>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Awaiting Customer</p>
+                                </div>
                                 <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{approvalsSummary.awaitingCustomer}</h3>
                             </div>
                             <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-200">
                                 <Send className="h-4 w-4" />
                             </div>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-2">Approved quotes sent to leads</p>
+                        <p className="text-[11px] text-slate-500 mt-2">Quote sent · Waiting customer YES</p>
                     </Card>
 
+                    {/* Step 3: Job Authorization Pending */}
+                    <Card
+                        onClick={() => {
+                            setActiveTab("approvals");
+                            setApprovalStatusFilter("JOB_AUTHORIZATION_PENDING");
+                        }}
+                        className={`bg-white/95 border shadow-sm hover:shadow-md transition-all rounded-2xl p-3.5 cursor-pointer ${
+                            approvalStatusFilter === "JOB_AUTHORIZATION_PENDING"
+                                ? "border-purple-500 ring-2 ring-purple-400/40 bg-purple-50/30"
+                                : "border-purple-300"
+                        }`}
+                    >
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px] font-bold">3</span>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Dispatch Pending</p>
+                                </div>
+                                <h3 className="text-2xl font-extrabold text-purple-950 mt-1">
+                                    {approvalsSummary.jobAuthPending ?? approvalsSummary.customerAccepted}
+                                </h3>
+                            </div>
+                            <div className="p-2 rounded-xl bg-purple-100 text-purple-700 border border-purple-200">
+                                <Briefcase className="h-4 w-4" />
+                            </div>
+                        </div>
+                        <p className="text-[11px] text-purple-900 font-semibold mt-2">Customer said YES · Dispatch Job</p>
+                    </Card>
+
+                    {/* Step 4: Booked in eWorks */}
                     <Card
                         onClick={() => {
                             setActiveTab("approvals");
                             setApprovalStatusFilter("JOB_CREATED_UNASSIGNED");
                         }}
-                        className="bg-white/95 border border-emerald-200/80 shadow-sm hover:shadow-md transition-all rounded-2xl p-4 cursor-pointer"
+                        className={`bg-white/95 border shadow-sm hover:shadow-md transition-all rounded-2xl p-3.5 cursor-pointer ${
+                            approvalStatusFilter === "JOB_CREATED_UNASSIGNED"
+                                ? "border-emerald-400 ring-2 ring-emerald-300/40 bg-emerald-50/20"
+                                : "border-emerald-200/80"
+                        }`}
                     >
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Booked in eWorks</p>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold">4</span>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Booked in eWorks</p>
+                                </div>
                                 <h3 className="text-2xl font-extrabold text-slate-900 mt-1">
                                     {approvalsSummary.jobCreated}{" "}
                                     <span className="text-xs font-bold text-emerald-700 font-mono">
@@ -339,21 +405,26 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                                 </h3>
                             </div>
                             <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
-                                <Briefcase className="h-4 w-4" />
+                                <Check className="h-4 w-4" />
                             </div>
                         </div>
                         <p className="text-[11px] text-slate-500 mt-2">
-                            {approvalsSummary.customerAccepted} customer accepted · {approvalsSummary.rejected} rejected
+                            Job created in eWorks CRM · {approvalsSummary.rejected} rejected
                         </p>
                     </Card>
 
+                    {/* Governance Emails Audit */}
                     <Card
                         onClick={() => setActiveTab("notifications")}
-                        className="bg-white/95 border border-violet-200/80 shadow-sm hover:shadow-md transition-all rounded-2xl p-4 cursor-pointer"
+                        className={`bg-white/95 border shadow-sm hover:shadow-md transition-all rounded-2xl p-3.5 cursor-pointer ${
+                            activeTab === "notifications"
+                                ? "border-violet-400 ring-2 ring-violet-300/40 bg-violet-50/20"
+                                : "border-slate-200"
+                        }`}
                     >
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="text-[11px] font-bold uppercase tracking-wider text-violet-700">Governance Emails</p>
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Audit Emails</p>
                                 <h3 className="text-2xl font-extrabold text-slate-900 mt-1">{notificationsSummary.total}</h3>
                             </div>
                             <div className="p-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-200">
@@ -475,22 +546,22 @@ export function ApprovalsGovernancePanel({ customerId, compact = false }: Approv
                         </div>
                     </div>
 
-                    {/* Filter Pills */}
+                    {/* Filter Pills: Aligned with the 4 Main Steps */}
                     {activeTab === "approvals" ? (
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                             {[
                                 { id: "ALL", label: `All (${approvals.length})` },
-                                { id: "SPECTRA_REVIEW_REQUIRED", label: `Pending Team Review (${approvalsSummary.reviewRequired})` },
-                                { id: "AWAITING_CUSTOMER_ACCEPTANCE", label: `Awaiting Customer (${approvalsSummary.awaitingCustomer})` },
-                                { id: "CUSTOMER_ACCEPTED", label: `Customer Accepted (${approvalsSummary.customerAccepted})` },
-                                { id: "JOB_CREATED_UNASSIGNED", label: `Job Created (${approvalsSummary.jobCreated})` },
+                                { id: "SPECTRA_REVIEW_REQUIRED", label: `Step 1: Quote Review (${approvalsSummary.reviewRequired})` },
+                                { id: "AWAITING_CUSTOMER_ACCEPTANCE", label: `Step 2: Awaiting Customer (${approvalsSummary.awaitingCustomer})` },
+                                { id: "JOB_AUTHORIZATION_PENDING", label: `Step 3: Dispatch Pending (${approvalsSummary.jobAuthPending ?? approvalsSummary.customerAccepted})` },
+                                { id: "JOB_CREATED_UNASSIGNED", label: `Step 4: Booked in eWorks (${approvalsSummary.jobCreated})` },
                                 { id: "REJECTED", label: `Rejected (${approvalsSummary.rejected})` },
                             ].map((f) => (
                                 <button
                                     key={f.id}
                                     type="button"
                                     onClick={() => setApprovalStatusFilter(f.id)}
-                                    className={`px-2.5 py-1 rounded-full font-semibold border transition-all ${
+                                    className={`px-2.5 py-1 rounded-full font-semibold border transition-all cursor-pointer ${
                                         approvalStatusFilter === f.id
                                             ? "bg-violet-600 text-white border-violet-600 shadow-2xs"
                                             : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"

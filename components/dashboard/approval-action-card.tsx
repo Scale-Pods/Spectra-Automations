@@ -100,6 +100,26 @@ export function ApprovalActionCard({
 
     const [copiedToken, setCopiedToken] = useState(false);
 
+    // Sync input state when record status or details change from server
+    React.useEffect(() => {
+        setPrice(initialPrice);
+        setSchedule(
+            record.requested_timing ||
+            record.proposal_payload?.preferred_timing ||
+            "Tomorrow at 4:00 PM"
+        );
+        setReviewerEmail(
+            isDispatchPending
+                ? "dispatch@spectradubai.com"
+                : "marketing@spectradubai.com"
+        );
+        setNotes(
+            isDispatchPending
+                ? "Confirmed schedule with customer. Central dispatch handling technician assignment."
+                : "Approved via Spectra Operations Portal"
+        );
+    }, [record.id, record.status, isDispatchPending, initialPrice, record.requested_timing]);
+
     // Cooldown countdown effect (locks buttons for 30s to prevent double-clicking and allow backend sync)
     React.useEffect(() => {
         if (cooldownSeconds <= 0) return;

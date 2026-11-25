@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { supabaseAdmin, supabase } from '@/lib/supabase';
 
 // Helper to get client (prefers supabaseAdmin for service role / bypass RLS, fallback to supabase)
@@ -276,120 +277,317 @@ export async function POST(req: Request) {
         }
 
         // -------------------------------------------------------------
-        // ACTION 2: RENDER VIDEO (Workflow 2: spectra-video-render)
+        // ACTION 2: RENDER VIDEO (Workflow 2: spectra-video-render) & EDIT REVISION
         // -------------------------------------------------------------
-        if (action === 'render') {
+        if (action === 'render' || action === 'edit_render' || action === 'edit_regenerate' || action === 'create_revision') {
             if (!jobId) {
                 return NextResponse.json({ success: false, error: 'jobId is required for render' }, { status: 400 });
             }
 
-            // Resolve target webhook for rendering BEFORE updating job status
+            const editInstructions = (body.edit_instructions || body.edits || '').trim();
+
+            // Fetch current/parent job from Supabase to reference existing shots, voiceover, engine, etc.
+            const { data: currentJob } = await db.from('video_jobs').select('*').eq('id', jobId).single();
+
+            // Resolve target webhook for rendering
             const targetRenderUrl =
                 renderWebhookUrl?.trim() ||
                 process.env.N8N_VIDEO_RENDER_WEBHOOK_URL?.trim() ||
                 deriveWebhookUrl(rawBaseWebhook, 'spectra-video-render');
 
-            if (!targetRenderUrl || (!targetRenderUrl.startsWith('http://') && !targetRenderUrl.startsWith('https://'))) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        needsWebhookConfig: true,
-                        webhookDispatched: false,
-                        error: 'Workflow 2 (spectra-video-render) webhook URL is not configured. Open Configure Webhook and enter your n8n webhook URL.'
-                    },
-                    { status: 400 }
-                );
-            }
-
-            // Persist any edited shots/script/copy without flipping status to rendering yet
-            const draftEdits: any = {};
             const requestedEngine = typeof body.overrideEngine === 'string' &&
                 ['veo-3.1-fast', 'veo-3.1-lite', 'veo-3.1-standard'].includes(body.overrideEngine)
                 ? body.overrideEngine
                 : undefined;
-            if (requestedEngine) {
-                draftEdits.engine = requestedEngine;
+
+            // ---------------------------------------------------------
+            // CASE A: USER REQUESTED EDITS ON AN EXISTING VIDEO
+            // Create a brand new linked video version (v2, v3, etc.)
+            // referenced with the original video, preserving both videos!
+            // ---------------------------------------------------------
+            if (editInstructions) {
+                const parentJob = currentJob;
+                const rootJobId = parentJob?.editing_notes?.root_job_id || parentJob?.id || jobId;
+                const parentVersion = Number(parentJob?.editing_notes?.version) || 1;
+                const newVersion = parentVersion + 1;
+                const newJobId = crypto.randomUUID();
+
+                // Base shots from parent or incoming shots
+                const sourceShots = Array.isArray(shots_json) && shots_json.length > 0
+                    ? shots_json
+                    : (parentJob && Array.isArray(parentJob.shots_json) ? parentJob.shots_json : []);
+
+                // Derive revised shots: append user edits & clear cached gcsUri so Veo AI renders fresh clips
+                const revisedShots = sourceShots.map((s: any, idx: number) => {
+                    const basePrompt = s.prompt || s.visual_prompt || `Commercial maintenance video shot ${idx + 1}`;
+                    const revisedPrompt = `${basePrompt}\n[REVISION v${newVersion}]: ${editInstructions}`;
+                    const { gcsUri, clipUrl, videoUrl, ...cleanShot } = s;
+                    return {
+                        ...cleanShot,
+                        index: idx,
+                        prompt: revisedPrompt,
+                        visual_prompt: revisedPrompt
+                    };
+                });
+
+                // Tag parent job with root_job_id and version if it was not tagged yet
+                if (parentJob && (!parentJob.editing_notes?.root_job_id || !parentJob.editing_notes?.version)) {
+                    await db.from('video_jobs').update({
+                        editing_notes: {
+                            ...(typeof parentJob.editing_notes === 'object' ? parentJob.editing_notes : {}),
+                            root_job_id: rootJobId,
+                            version: parentVersion,
+                            version_label: `v${parentVersion} (Original)`
+                        }
+                    }).eq('id', parentJob.id);
+                }
+
+                // Insert the new version job record into Supabase
+                const newJobPayload: any = {
+                    id: newJobId,
+                    profile_id: parentJob?.profile_id || null,
+                    topic: parentJob?.topic || 'Spectra Maintenance Reel',
+                    platform: parentJob?.platform || 'instagram',
+                    aspect_ratio: parentJob?.aspect_ratio || '9:16',
+                    video_type: parentJob?.video_type || 'generated_clips',
+                    engine: requestedEngine || parentJob?.engine || 'veo-3.1-fast',
+                    resolution: parentJob?.resolution || '1080p',
+                    video_style_id: parentJob?.video_style_id || null,
+                    shots_json: revisedShots,
+                    copy_json: parentJob?.copy_json || null,
+                    voiceover_script: voiceover_script !== undefined ? voiceover_script : (parentJob?.voiceover_script || null),
+                    voiceover_url: parentJob?.voiceover_url || null,
+                    music_prompt: parentJob?.music_prompt || null,
+                    music_url: parentJob?.music_url || null,
+                    estimated_cost_usd: parentJob?.estimated_cost_usd || null,
+                    status: 'rendering',
+                    render_progress: { stage: 'starting', percent: 5 },
+                    output_video_url: null,
+                    editing_notes: {
+                        ...(typeof parentJob?.editing_notes === 'object' ? parentJob.editing_notes : {}),
+                        parent_job_id: parentJob?.id || jobId,
+                        root_job_id: rootJobId,
+                        version: newVersion,
+                        version_label: `v${newVersion}`,
+                        revision_notes: editInstructions,
+                        created_from_revision: true
+                    },
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                };
+
+                const { data: createdJob, error: createErr } = await db
+                    .from('video_jobs')
+                    .insert(newJobPayload)
+                    .select()
+                    .single();
+
+                if (createErr) {
+                    console.error('Failed to create revised video job row:', createErr);
+                    return NextResponse.json({ success: false, error: createErr.message }, { status: 500 });
+                }
+
+                // 1. Dispatch to Railway Video Engine for the new job
+                let railwayDispatched = false;
+                let railwayResponse: any = null;
+                if (VIDEO_ENGINE_URL) {
+                    try {
+                        const railwayPayload = {
+                            jobId: newJobId,
+                            shots_json: revisedShots,
+                            engine: newJobPayload.engine,
+                            resolution: newJobPayload.resolution,
+                            aspect_ratio: newJobPayload.aspect_ratio,
+                            voiceover_url: newJobPayload.voiceover_url,
+                            voiceover_script: newJobPayload.voiceover_script,
+                            wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
+                            subtitleStyle: subtitleStyle || 'bold_yellow',
+                            brandName: 'Spectra Property Maintenance Dubai'
+                        };
+
+                        const rRes = await fetch(`${VIDEO_ENGINE_URL}/jobs/render`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${VIDEO_ENGINE_TOKEN}`
+                            },
+                            body: JSON.stringify(railwayPayload),
+                            signal: AbortSignal.timeout(15000)
+                        });
+
+                        railwayDispatched = rRes.ok || rRes.status === 202;
+                        try {
+                            railwayResponse = await rRes.json();
+                        } catch {
+                            railwayResponse = await rRes.text();
+                        }
+                    } catch (rErr: any) {
+                        console.warn('Railway render dispatch notice:', rErr.message);
+                    }
+                }
+
+                // 2. Dispatch to n8n webhook (spectra-video-render)
+                let webhookResponse = null;
+                let webhookDispatched = false;
+                if (targetRenderUrl && (targetRenderUrl.startsWith('http://') || targetRenderUrl.startsWith('https://'))) {
+                    try {
+                        const res = await fetch(targetRenderUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'User-Agent': 'Spectra-AI-Studio/2.0'
+                            },
+                            body: JSON.stringify({
+                                jobId: newJobId,
+                                parentJobId: parentJob?.id,
+                                rootJobId,
+                                version: newVersion,
+                                edit_instructions: editInstructions,
+                                engine: newJobPayload.engine,
+                                wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
+                                subtitleStyle: subtitleStyle || 'bold_yellow'
+                            }),
+                            signal: AbortSignal.timeout(20000)
+                        });
+                        webhookDispatched = res.ok;
+                    } catch (err: any) {
+                        console.warn('Could not contact spectra-video-render webhook:', err.message);
+                    }
+                }
+
+                return NextResponse.json({
+                    success: true,
+                    jobId: newJobId,
+                    parentJobId: parentJob?.id,
+                    rootJobId,
+                    version: newVersion,
+                    version_label: `v${newVersion}`,
+                    status: 'rendering',
+                    job: normalizeJobUrls(createdJob || newJobPayload),
+                    isRevision: true,
+                    railwayDispatched,
+                    webhookDispatched: railwayDispatched || webhookDispatched
+                });
             }
+
+            // ---------------------------------------------------------
+            // CASE B: INITIAL RENDER (Render from storyboard draft)
+            // ---------------------------------------------------------
+            const draftEdits: any = {};
+            if (requestedEngine) draftEdits.engine = requestedEngine;
+
             if (Array.isArray(shots_json)) {
-                draftEdits.shots_json = shots_json;
+                draftEdits.shots_json = shots_json.map((s: any, idx: number) => {
+                    const { gcsUri, clipUrl, videoUrl, ...rest } = s;
+                    return {
+                        ...rest,
+                        index: idx,
+                        prompt: s.prompt || s.visual_prompt || '',
+                        visual_prompt: s.visual_prompt || s.prompt || ''
+                    };
+                });
+                draftEdits.status = 'draft_ready';
+                draftEdits.render_progress = { stage: 'starting', percent: 5 };
+                draftEdits.output_video_url = null;
+                draftEdits.final_video_url = null;
+                draftEdits.completed_at = null;
+                draftEdits.error_detail = null;
+                draftEdits.actual_cost_usd = null;
+                draftEdits.updated_at = new Date().toISOString();
             }
-            if (voiceover_script !== undefined) {
-                draftEdits.voiceover_script = voiceover_script;
-            }
-            if (copy_json !== undefined) {
-                draftEdits.copy_json = copy_json;
-            }
+
+            if (voiceover_script !== undefined) draftEdits.voiceover_script = voiceover_script;
+            if (copy_json !== undefined) draftEdits.copy_json = copy_json;
+
             if (Object.keys(draftEdits).length > 0) {
                 await db.from('video_jobs').update(draftEdits).eq('id', jobId);
             }
 
-            let webhookResponse = null;
+            const effectiveShots = draftEdits.shots_json || (currentJob && currentJob.shots_json) || [];
+            const effectiveEngine = requestedEngine || draftEdits.engine || currentJob?.engine || 'veo-3.1-fast';
 
-            try {
-                const res = await fetch(targetRenderUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'Spectra-AI-Studio/2.0'
-                    },
-                    body: JSON.stringify({
+            let railwayDispatched = false;
+            let railwayResponse: any = null;
+            if (VIDEO_ENGINE_URL) {
+                try {
+                    const railwayPayload = {
                         jobId,
-                        ...(requestedEngine ? { engine: requestedEngine } : {}),
+                        shots_json: effectiveShots,
+                        engine: effectiveEngine,
+                        resolution: currentJob?.resolution || '1080p',
+                        aspect_ratio: currentJob?.aspect_ratio || '9:16',
+                        voiceover_url: draftEdits.voiceover_url || currentJob?.voiceover_url,
+                        voiceover_script: draftEdits.voiceover_script || currentJob?.voiceover_script,
                         wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
                         subtitleStyle: subtitleStyle || 'bold_yellow',
-                        body: {
+                        brandName: 'Spectra Property Maintenance Dubai'
+                    };
+
+                    const rRes = await fetch(`${VIDEO_ENGINE_URL}/jobs/render`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${VIDEO_ENGINE_TOKEN}`
+                        },
+                        body: JSON.stringify(railwayPayload),
+                        signal: AbortSignal.timeout(15000)
+                    });
+
+                    railwayDispatched = rRes.ok || rRes.status === 202;
+                    try {
+                        railwayResponse = await rRes.json();
+                    } catch {
+                        railwayResponse = await rRes.text();
+                    }
+                } catch (rErr: any) {
+                    console.warn('Direct Railway video render notice:', rErr.message);
+                }
+            }
+
+            let webhookResponse = null;
+            let webhookDispatched = false;
+            if (targetRenderUrl && (targetRenderUrl.startsWith('http://') || targetRenderUrl.startsWith('https://'))) {
+                try {
+                    const res = await fetch(targetRenderUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'Spectra-AI-Studio/2.0'
+                        },
+                        body: JSON.stringify({
                             jobId,
                             ...(requestedEngine ? { engine: requestedEngine } : {}),
                             wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
-                            subtitleStyle: subtitleStyle || 'bold_yellow'
-                        }
-                    }),
-                    signal: AbortSignal.timeout(25000)
-                });
-
-                const contentType = res.headers.get('content-type') || '';
-                if (contentType.includes('application/json')) {
-                    webhookResponse = await res.json();
-                } else {
-                    webhookResponse = await res.text();
+                            subtitleStyle: subtitleStyle || 'bold_yellow',
+                            body: {
+                                jobId,
+                                ...(requestedEngine ? { engine: requestedEngine } : {}),
+                                wantsSubtitles: Boolean(wantsSubtitles ?? hasSubtitles ?? true),
+                                subtitleStyle: subtitleStyle || 'bold_yellow'
+                            }
+                        }),
+                        signal: AbortSignal.timeout(20000)
+                    });
+                    webhookDispatched = res.ok;
+                } catch (err: any) {
+                    console.warn('Could not contact spectra-video-render webhook:', err.message);
                 }
-
-                if (!res.ok) {
-                    const errDetail = typeof webhookResponse === 'string'
-                        ? webhookResponse.slice(0, 300)
-                        : JSON.stringify(webhookResponse).slice(0, 300);
-                    return NextResponse.json(
-                        {
-                            success: false,
-                            webhookDispatched: false,
-                            targetUrl: targetRenderUrl,
-                            error: `Workflow 2 (spectra-video-render) returned HTTP ${res.status}: ${errDetail || res.statusText}`
-                        },
-                        { status: 502 }
-                    );
-                }
-            } catch (err: any) {
-                console.warn('Could not contact spectra-video-render webhook:', err.message);
-                return NextResponse.json(
-                    {
-                        success: false,
-                        webhookDispatched: false,
-                        targetUrl: targetRenderUrl,
-                        error: `Could not reach Workflow 2 (spectra-video-render): ${err.message}`
-                    },
-                    { status: 502 }
-                );
             }
 
-            // Only mark rendering after Workflow 2 actually accepted the webhook request
-            await db.from('video_jobs').update({ status: 'rendering', error_detail: null }).eq('id', jobId);
+            await db.from('video_jobs').update({
+                status: 'rendering',
+                error_detail: null,
+                updated_at: new Date().toISOString()
+            }).eq('id', jobId);
 
             return NextResponse.json({
                 success: true,
                 jobId,
                 status: 'rendering',
-                webhookDispatched: true,
-                webhookResponse: webhookResponse || 'ScalePods video render dispatched'
+                railwayDispatched,
+                railwayResponse,
+                webhookDispatched: railwayDispatched || webhookDispatched,
+                webhookResponse: webhookResponse || railwayResponse || 'Video render dispatched to Railway Veo engine'
             });
         }
 
