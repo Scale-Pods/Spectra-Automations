@@ -69,7 +69,11 @@ export async function POST(req: Request) {
             }
 
             // Re-dispatch to n8n webhook using the SAME jobId (no new job is created)
-            const targetWebhookUrl = webhookUrl?.trim() || process.env.N8N_STUDIO_WEBHOOK_URL;
+            const targetWebhookUrl =
+                webhookUrl?.trim() ||
+                process.env.N8N_STUDIO_GENERATE_WEBHOOK_URL ||
+                process.env.N8N_STUDIO_WEBHOOK_URL ||
+                'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-studio-generate';
             let webhookResult = null;
             let webhookDispatched = false;
 
@@ -162,7 +166,11 @@ export async function POST(req: Request) {
         }
 
         // 2. Dispatch to n8n webhook
-        const targetWebhookUrl = webhookUrl?.trim() || process.env.N8N_STUDIO_WEBHOOK_URL;
+        const targetWebhookUrl =
+            webhookUrl?.trim() ||
+            process.env.N8N_STUDIO_GENERATE_WEBHOOK_URL ||
+            process.env.N8N_STUDIO_WEBHOOK_URL ||
+            'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-studio-generate';
         let webhookResult = null;
         let webhookDispatched = false;
 

@@ -163,7 +163,8 @@ export async function POST(req: Request) {
             const targetBriefUrl =
                 briefWebhookUrl?.trim() ||
                 process.env.N8N_VIDEO_BRIEF_WEBHOOK_URL?.trim() ||
-                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-brief');
+                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-brief') ||
+                'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-video-brief';
 
             if (!targetBriefUrl || (!targetBriefUrl.startsWith('http://') && !targetBriefUrl.startsWith('https://'))) {
                 return NextResponse.json(
@@ -293,7 +294,8 @@ export async function POST(req: Request) {
             const targetRenderUrl =
                 renderWebhookUrl?.trim() ||
                 process.env.N8N_VIDEO_RENDER_WEBHOOK_URL?.trim() ||
-                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-render');
+                deriveWebhookUrl(rawBaseWebhook, 'spectra-video-render') ||
+                'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-video-render';
 
             const requestedEngine = typeof body.overrideEngine === 'string' &&
                 ['veo-3.1-fast', 'veo-3.1-lite', 'veo-3.1-standard'].includes(body.overrideEngine)

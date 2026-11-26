@@ -153,13 +153,17 @@ export default function AIContentStudioPage() {
     const [editingShotIdx, setEditingShotIdx] = useState<number | null>(null);
 
     // 5. Webhook & Job Pipeline State
-    const [webhookUrl, setWebhookUrl] = useState('');
-    const [videoBriefWebhookUrl, setVideoBriefWebhookUrl] = useState('');
-    const [videoRenderWebhookUrl, setVideoRenderWebhookUrl] = useState('');
+    const DEFAULT_IMAGE_WEBHOOK_URL = 'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-studio-generate';
+    const DEFAULT_VIDEO_BRIEF_WEBHOOK_URL = 'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-video-brief';
+    const DEFAULT_VIDEO_RENDER_WEBHOOK_URL = 'https://n8n.srv1010832.hstgr.cloud/webhook/spectra-video-render';
+
+    const [webhookUrl, setWebhookUrl] = useState(DEFAULT_IMAGE_WEBHOOK_URL);
+    const [videoBriefWebhookUrl, setVideoBriefWebhookUrl] = useState(DEFAULT_VIDEO_BRIEF_WEBHOOK_URL);
+    const [videoRenderWebhookUrl, setVideoRenderWebhookUrl] = useState(DEFAULT_VIDEO_RENDER_WEBHOOK_URL);
     const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
-    const [tempWebhookUrl, setTempWebhookUrl] = useState('');
-    const [tempVideoBriefWebhookUrl, setTempVideoBriefWebhookUrl] = useState('');
-    const [tempVideoRenderWebhookUrl, setTempVideoRenderWebhookUrl] = useState('');
+    const [tempWebhookUrl, setTempWebhookUrl] = useState(DEFAULT_IMAGE_WEBHOOK_URL);
+    const [tempVideoBriefWebhookUrl, setTempVideoBriefWebhookUrl] = useState(DEFAULT_VIDEO_BRIEF_WEBHOOK_URL);
+    const [tempVideoRenderWebhookUrl, setTempVideoRenderWebhookUrl] = useState(DEFAULT_VIDEO_RENDER_WEBHOOK_URL);
 
     // Active Job & Generation Lifecycle
     const [isGenerating, setIsGenerating] = useState(false);
@@ -353,26 +357,17 @@ export default function AIContentStudioPage() {
         const savedBrief = localStorage.getItem("SPECTRA_VIDEO_BRIEF_WEBHOOK_URL");
         const savedRender = localStorage.getItem("SPECTRA_VIDEO_RENDER_WEBHOOK_URL");
 
-        if (savedUrl) {
-            setWebhookUrl(savedUrl);
-            setTempWebhookUrl(savedUrl);
-        }
-        if (savedBrief) {
-            setVideoBriefWebhookUrl(savedBrief);
-            setTempVideoBriefWebhookUrl(savedBrief);
-        } else if (savedUrl) {
-            const derived = deriveVideoWebhookUrl(savedUrl, 'spectra-video-brief');
-            setVideoBriefWebhookUrl(derived);
-            setTempVideoBriefWebhookUrl(derived);
-        }
-        if (savedRender) {
-            setVideoRenderWebhookUrl(savedRender);
-            setTempVideoRenderWebhookUrl(savedRender);
-        } else if (savedUrl) {
-            const derived = deriveVideoWebhookUrl(savedUrl, 'spectra-video-render');
-            setVideoRenderWebhookUrl(derived);
-            setTempVideoRenderWebhookUrl(derived);
-        }
+        const activeUrl = savedUrl || DEFAULT_IMAGE_WEBHOOK_URL;
+        setWebhookUrl(activeUrl);
+        setTempWebhookUrl(activeUrl);
+
+        const activeBrief = savedBrief || deriveVideoWebhookUrl(activeUrl, 'spectra-video-brief') || DEFAULT_VIDEO_BRIEF_WEBHOOK_URL;
+        setVideoBriefWebhookUrl(activeBrief);
+        setTempVideoBriefWebhookUrl(activeBrief);
+
+        const activeRender = savedRender || deriveVideoWebhookUrl(activeUrl, 'spectra-video-render') || DEFAULT_VIDEO_RENDER_WEBHOOK_URL;
+        setVideoRenderWebhookUrl(activeRender);
+        setTempVideoRenderWebhookUrl(activeRender);
 
         fetchRecentJobs();
         fetchRecentVideoJobs();
